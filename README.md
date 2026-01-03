@@ -11,7 +11,7 @@ Take a moment to look at the 3 symbols in `symbols/` and then examine `test_set/
 ## The Task
 
 1. **Build a synthetic dataset generator** that creates training images by:
-   - Using the architectural PDFs in `architecture/` as backgrounds
+   - Using the architectural PDFs in `architecture/` as backgrounds (or foregrounds)
    - Randomly overlaying symbols from `symbols/` onto these backgrounds
    - Generating labeled training data in **YOLO format** (images + corresponding `.txt` annotation files with normalized bounding boxes)
 
