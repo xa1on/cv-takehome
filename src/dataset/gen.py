@@ -1,8 +1,9 @@
 """
 Generate architectural datasets for symbol detection
 
-TODO:
 1. grab images from architectural pdfs
+
+TODO:
 2. add symbols randomly to architectural pdfs, resembling real architectural documents.
     - hough line transform to detect walls/pipes.
     - strategically place T symbols (thermostats) along walls
@@ -14,11 +15,12 @@ TODO:
 """
 
 import os
+import math
 from pathlib import Path
+from dataclasses import dataclass
 
-
-import numpy as np
 import cv2
+import numpy as np
 from pdf2image import convert_from_path
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
@@ -28,6 +30,24 @@ BACKGROUNDS_DIR = os.path.join(DIR_PATH, "../../architecture")
 
 DATA_DIR = os.path.join(DIR_PATH, "../../data")
 EXTRACTED_IMG_DIR = os.path.join(DATA_DIR, "extracted_arch")
+
+@dataclass
+class Vector2:
+    x: int
+    y: int
+
+@dataclass
+class DetectedLine:
+    """Represents a line in the image"""
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+    def __post_init__(self):
+        self.angle: float = math.degrees(math.atan2(self.y2 - self.y1, self.x2 - self.x1))
+        self.length: float = math.sqrt((self.x2 - self.x1) ** 2 + (self.y2 - self.y1) ** 2)
+        self.midpoint: Vector2 = Vector2(x=(self.x1 + self.x2) // 2, y=(self.y1 + self.y2) // 2)
 
 def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[str]:
     """
@@ -62,6 +82,8 @@ def extract_pdfs(path: str, output: str=EXTRACTED_IMG_DIR) -> list[str]:
     for file in list(Path(path).glob('*.pdf')):
         result += extract_pdf_img(str(file), output)
     return result
+
+
 
 def main():
     extract_pdfs(BACKGROUNDS_DIR)
