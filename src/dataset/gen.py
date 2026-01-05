@@ -11,8 +11,6 @@ TODO:
     - Keynotes: probably just good to put them randomly
 3. Generate in YOLO format
 4. write documentation :P
-5. split into more files, shouldn't clup everything in one file
-6. (if i have extra time) yaml config file to setup hough params and general config stuff 
 
 - Chenghao Li
 """
@@ -57,6 +55,47 @@ CLASS_PLACEMENT = {
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+@dataclass
+class Sample(Background):
+    bounding_boxes: list[BoundingBox]
+
+    def __post_init__(self):
+        self.result: np.array = self.data.copy()
+        return super().__post_init__()
+
+    def _overlay_symbol(self, symbol: Symbol, position: Vector2) -> None:
+        # position is relative, as center
+        x = position.x - self.dim.x // 2
+        y = position.y - self.dim.y // 2
+
+        if symbol.shape[2] == 4:
+            # extract alpha channel
+            alpha = symbol[:, :, 3] / 255.0
+            alpha = alpha[:, :, np.newaxis]
+
+            # blend
+            roi = self.result[y:y + symbol.dim.y, x:x + symbol.dim.x]
+            blended = (alpha * symbol.data[:, :, :3] + (1 - alpha) * roi).astype(np.uint8)
+            self.result[y:y + symbol.dim.y, x:x + symbol.dim.x] = blended
+        else:
+            # simple overlay (with white as transparent)
+            gray_symbol = cv2.cvtColor(symbol.data, cv2.COLOR_BGR2GRAY)
+            _, mask = cv2.threshold(gray_symbol, 250, 255, cv2.THRESH_BINARY_INV)
+            mask_inv = cv2.bitwise_not(mask)
+
+            roi = self.result[y:y + symbol.dim.y, x:x + symbol.dim.x]
+            bg_part = cv2.bitwise_and(roi, roi, mask=mask_inv)
+            sym_part = cv2.bitwise_and(symbol.data, symbol.data, mask=mask)
+            self.result[y:y + symbol.dim.y, x:x + symbol.dim.x] = cv2.add(bg_part, sym_part)
+        
+        self.bounding_boxes.append(
+            BoundingBox(
+                center=self.get_abs(position),
+                dim=self.get_abs(symbol.dim)
+            )
+        )
+
+
 class DatasetGenerator:
     def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2=IMAGE_SIZE):
         self.symbols: list[Symbol] = symbols
@@ -75,14 +114,14 @@ class DatasetGenerator:
     def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=IMAGE_SIZE):
         # use when you already extracted pdf images
         backgrounds = grab_backgrounds(backgrounds_dir)
-        symbols = grab_symbols(symbols_dir, CLASS_PLACEMENT)
+        symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
         return cls(symbols, backgrounds, output_dir, image_size)
 
     @classmethod
     def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, extract_output: str=EXTRACTED_IMG_DIR, image_size: Vector2=IMAGE_SIZE):
         # use if pdf images aren't extracted
         backgrounds = extract_pdfs(backgrounds_dir, extract_output, image_size)
-        symbols = grab_symbols(symbols_dir, CLASS_PLACEMENT)
+        symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
         return cls(symbols, backgrounds, output_dir, image_size)
 
 
@@ -98,8 +137,7 @@ def demo_lines(path: str) -> None:
     cv2.waitKey(0)
 
 def main():
-    # result = DatasetGenerator.from_pdfs(SYMBOLS_DIR, BACKGROUNDS_DIR, OUTPUT_DIR)
-    demo_lines(os.path.join(EXTRACTED_IMG_DIR, "PL24.095-Architectural-Plans.pdf-p1.png"))
+    result = DatasetGenerator.from_pdfs(SYMBOLS_DIR, BACKGROUNDS_DIR, OUTPUT_DIR)
     
 
 

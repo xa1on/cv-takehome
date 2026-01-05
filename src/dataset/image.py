@@ -31,28 +31,45 @@ class PlacementMode(Enum):
 
 @dataclass
 class Vector2:
-    x: int
-    y: int
+    x: float|int
+    y: float|int
 
-    def to_tuple(self) -> tuple[int, int]:
+    def to_tuple(self) -> tuple[int|float, int|float]:
         return self.x, self.y
+
+    @classmethod
+    def from_list(cls, list: list[int|float] | tuple[int|float]) -> Self:
+        return cls(list[0], list[1])
+    
+    @classmethod
+    def from_shape(cls, dim: list[int|float]) -> Self:
+        return cls.from_list(dim[1], dim[0])
 
 @dataclass
 class DetectedLine:
-    x1: int
-    y1: int
-    x2: int
-    y2: int
+    p1: Vector2
+    p2: Vector2
 
     def __post_init__(self):
-        self.angle: float = math.degrees(math.atan2(self.y2 - self.y1, self.x2 - self.x1))
-        self.length: float = math.sqrt((self.x2 - self.x1) ** 2 + (self.y2 - self.y1) ** 2)
-        self.midpoint: Vector2 = Vector2(x=(self.x1 + self.x2) // 2, y=(self.y1 + self.y2) // 2)
+        self.angle: float = math.degrees(math.atan2(self.p2.y - self.p1.y, self.p2.x - self.p1.x))
+        self.length: float = math.sqrt((self.p2.x - self.p1.x) ** 2 + (self.p2.y - self.p1.y) ** 2)
+        self.midpoint: Vector2 = Vector2(x=(self.p1.x + self.p2.x) // 2, y=(self.p1.y + self.p2.y) // 2)
 
 @dataclass
 class Image:
     name: str
     data: np.array
+
+    def __post_init__(self):
+        self.dim: Vector2 = Vector2.from_shape(self.data.shape)
+    
+    def get_rel(self, abs: Vector2) -> Vector2:
+        # abs.x and abs.y is aboslute position (0 - 1)
+        return Vector2(self.dim.x * abs.x, self.dim.y * abs.y)
+    
+    def get_abs(self, rel: Vector2):
+        # rel.x and rel.y is relative position
+        return Vector2(rel.x / self.dim.x, rel.y / self.dim.y)
 
     def resize(self, new: Vector2) -> None:
         self.data = cv2.resize(self.data, new.to_tuple())
@@ -68,6 +85,7 @@ class Background(Image):
 @dataclass
 class Symbol(Image):
     placement: PlacementMode
+    id: int
 
     @classmethod
     def from_path(cls, path: str, placement: PlacementMode) -> Self:
@@ -106,8 +124,17 @@ class Symbol(Image):
                                      borderMode=cv2.BORDER_CONSTANT,
                                      borderValue=(255, 255, 255))
 
-        return Symbol(name=self.name, data=img, placement=self.placement)
-    
+        return Symbol(name=self.name, data=img, id=self.id, placement=self.placement)
+
+@dataclass
+class BoundingBox:
+    center: Vector2 # abs
+    dim: Vector2 # abs
+    symbol: Symbol
+
+    def to_yolo_format(self) -> str:
+        return f"{self.symbol.id} {self.center.x:.6f} {self.center.y:.6f} {self.dim.x:.6f} {self.dim.y:.6f}"
+
 
 def detect_lines(img: np.array) -> list[DetectedLine]:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -128,7 +155,8 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
         x1, y1, x2, y2 = line[0]
         detected_lines.append(
             DetectedLine(
-                x1=x1, y1=y1, x2=x2, y2=y2
+                p1=Vector2(x1, y1),
+                p2=Vector2(x2, y2)
             )
         )
 
@@ -136,10 +164,10 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
 
     return detected_lines
 
-def filter_lines(lines: list[DetectedLine], dim: tuple[int, int, int], scale: float) -> list[DetectedLine]:
+def filter_lines(lines: list[DetectedLine], dim: Vector2, scale: float) -> list[DetectedLine]:
     result = []
     for line in lines:
-        if line.midpoint.x > dim[1] * (scale / 2) and line.midpoint.x < dim[1] * (1 - (scale / 2)) and line.midpoint.y > dim[0] * (scale / 2) and line.midpoint.y < dim[0] * (1 - (scale / 2)):
+        if line.midpoint.x > dim.x * (scale / 2) and line.midpoint.x < dim.x * (1 - (scale / 2)) and line.midpoint.y > dim.y * (scale / 2) and line.midpoint.y < dim.y * (1 - (scale / 2)):
             result.append(line)
     logger.info(f"Filtered to keep {len(result)} lines.")
     return result
@@ -181,11 +209,11 @@ def grab_backgrounds(path: str) -> list[Background]:
     logger.info(f"Grabbed {len(result)} background images from {path}.")
     return result
 
-def grab_symbols(path: str, placement: dict[str: PlacementMode]) -> list[Symbol]:
+def grab_symbols(path: str, ids: dict[str: int], placement: dict[str: PlacementMode]) -> list[Symbol]:
     result: list[Symbol] = []
     for file in list(Path(path).glob('*.png')):
         name = file.stem
-        new_symbol = Symbol(name=name, data=cv2.imread(str(file)), placement=placement[file.stem])
+        new_symbol = Symbol(name=name, data=cv2.imread(str(file)), placement=placement[name], id=ids[name])
         result.append(new_symbol)
         logger.info(f"Loaded symbol {name} from {str(file)}")
     logger.info(f"Grabbed {len(result)} symbols from {path}.")
