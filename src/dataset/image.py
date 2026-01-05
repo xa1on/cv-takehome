@@ -156,14 +156,15 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
     )
 
     detected_lines: list[DetectedLine] = []
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        detected_lines.append(
-            DetectedLine(
-                p1=Vector2(x1, y1),
-                p2=Vector2(x2, y2)
+    if lines:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            detected_lines.append(
+                DetectedLine(
+                    p1=Vector2(x1, y1),
+                    p2=Vector2(x2, y2)
+                )
             )
-        )
 
     logger.info(f"Detected {len(detected_lines)} lines.")
 
@@ -181,7 +182,7 @@ def extract_pdf_img(path: str, output: str, image_size: Vector2) -> list[Backgro
     result: list[Background] = []
     for i, page in enumerate(convert_from_path(path)):
         name = f"{os.path.basename(path)}-p{i}.png"
-        data = np.array(page)
+        data = cv2.cvtColor(np.array(page), cv2.COLOR_RGB2BGR)
         data = cv2.resize(data, image_size.to_tuple())
         result.append(
             Background(name=name, data=data, lines=detect_lines(data))
@@ -218,7 +219,7 @@ def grab_symbols(path: str, ids: dict[str: int], placement: dict[str: PlacementM
     result: list[Symbol] = []
     for file in list(Path(path).glob('*.png')):
         name = file.stem
-        new_symbol = Symbol(name=name, data=cv2.imread(str(file)), placement=placement[name], id=ids[name])
+        new_symbol = Symbol(name=name, data=cv2.imread(str(file), cv2.IMREAD_UNCHANGED), placement=placement[name], id=ids[name])
         result.append(new_symbol)
         logger.info(f"Loaded symbol {name} from {str(file)}")
     logger.info(f"Grabbed {len(result)} symbols from {path}.")

@@ -57,10 +57,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Sample(Background):
-    bounding_boxes: list[BoundingBox]
-
     def __post_init__(self):
         self.result: np.array = self.data.copy()
+        self.bounding_boxes: list[BoundingBox] = []
         super().__post_init__()
 
     def _overlay_symbol(self, symbol: Symbol, position: Vector2) -> None:
