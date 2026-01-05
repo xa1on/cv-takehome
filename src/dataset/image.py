@@ -43,7 +43,7 @@ class Vector2:
     
     @classmethod
     def from_shape(cls, dim: list[int|float]) -> Self:
-        return cls.from_list(dim[1], dim[0])
+        return cls.from_list([dim[1], dim[0]])
 
 @dataclass
 class DetectedLine:
@@ -54,7 +54,6 @@ class DetectedLine:
         self.angle: float = math.degrees(math.atan2(self.p2.y - self.p1.y, self.p2.x - self.p1.x))
         self.length: float = math.sqrt((self.p2.x - self.p1.x) ** 2 + (self.p2.y - self.p1.y) ** 2)
         self.midpoint: Vector2 = Vector2(x=(self.p1.x + self.p2.x) // 2, y=(self.p1.y + self.p2.y) // 2)
-        return self
 
 @dataclass
 class Image:
@@ -63,7 +62,6 @@ class Image:
 
     def __post_init__(self):
         self.dim: Vector2 = Vector2.from_shape(self.data.shape)
-        return self
     
     def get_rel(self, abs: Vector2) -> Vector2:
         # abs.x and abs.y is aboslute position (0 - 1)
@@ -78,22 +76,16 @@ class Image:
 
 @dataclass
 class Background(Image):
-    lines: DetectedLine
+    lines: list[DetectedLine]
 
     @classmethod
     def from_img(cls, img: Image):
-        cls(name=img.name, data=img.data, lines=detect_lines(img.data))
+        return cls(name=img.name, data=img.data, lines=detect_lines(img.data))
 
 @dataclass
 class Symbol(Image):
-    placement: PlacementMode
     id: int
-
-    @classmethod
-    def from_path(cls, path: str, placement: PlacementMode) -> Self:
-        data = cv2.imread(path)
-        name = os.path.basename(path)
-        return cls(name=name, data=data, placement=placement)
+    placement: PlacementMode
     
     def transform(self, scale: float=1, rotation: float=0) -> Self:
         # copy of symbol w/ given scale and rotation
@@ -130,6 +122,7 @@ class Symbol(Image):
 
 @dataclass
 class BoundingBox:
+
     center: Vector2 # abs
     dim: Vector2 # abs
     symbol: Symbol
@@ -137,13 +130,12 @@ class BoundingBox:
     def __post_init__(self):
         self.tl = Vector2(self.center.x - (self.dim.x / 2), self.center.y - (self.dim.y / 2))
         self.br = Vector2(self.center.x + (self.dim.x / 2), self.center.y + (self.dim.y / 2))
-        return self
 
     def overlap(self, other: Self) -> bool:
         return not (self.tl.x > other.br.x
                     or self.br.x < other.tl.x
-                    or self.tl.y < other.br.y
-                    or self.br.y > other.tl.y)
+                    or self.tl.y > other.br.y
+                    or self.br.y < other.tl.y)
 
     def to_yolo_format(self) -> str:
         return f"{self.symbol.id} {self.center.x:.6f} {self.center.y:.6f} {self.dim.x:.6f} {self.dim.y:.6f}"

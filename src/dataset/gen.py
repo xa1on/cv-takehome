@@ -61,16 +61,16 @@ class Sample(Background):
 
     def __post_init__(self):
         self.result: np.array = self.data.copy()
-        return super().__post_init__()
+        super().__post_init__()
 
     def _overlay_symbol(self, symbol: Symbol, position: Vector2) -> None:
         # position is relative, as center
-        x = position.x - self.dim.x // 2
-        y = position.y - self.dim.y // 2
+        x = position.x - symbol.dim.x // 2
+        y = position.y - symbol.dim.y // 2
 
-        if symbol.shape[2] == 4:
+        if symbol.data.shape[2] == 4:
             # extract alpha channel
-            alpha = symbol[:, :, 3] / 255.0
+            alpha = symbol.data[:, :, 3] / 255.0
             alpha = alpha[:, :, np.newaxis]
 
             # blend
@@ -91,9 +91,12 @@ class Sample(Background):
         self.bounding_boxes.append(
             BoundingBox(
                 center=self.get_abs(position),
-                dim=self.get_abs(symbol.dim)
+                dim=self.get_abs(symbol.dim),
+                symbol=symbol
             )
         )
+
+    
 
 
 class DatasetGenerator:
@@ -129,9 +132,9 @@ class DatasetGenerator:
 def demo_lines(path: str) -> None:
     img = cv2.imread(path)
     lines = detect_lines(img)
-    filtered_lines = filter_lines(lines, img.shape, 0.15)
+    filtered_lines = filter_lines(lines, Vector2.from_shape(img.shape), 0.15)
     for line in filtered_lines:
-        cv2.line(img, (line.x1, line.y1), (line.x2, line.y2), (0, 0, 255), 2)
+        cv2.line(img, (line.p1.x, line.p1.y), (line.p2.x, line.p2.y), (0, 0, 255), 2)
     final_img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
     cv2.imshow("lines", final_img)
     cv2.waitKey(0)
