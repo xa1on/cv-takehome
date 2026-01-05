@@ -54,6 +54,7 @@ class DetectedLine:
         self.angle: float = math.degrees(math.atan2(self.p2.y - self.p1.y, self.p2.x - self.p1.x))
         self.length: float = math.sqrt((self.p2.x - self.p1.x) ** 2 + (self.p2.y - self.p1.y) ** 2)
         self.midpoint: Vector2 = Vector2(x=(self.p1.x + self.p2.x) // 2, y=(self.p1.y + self.p2.y) // 2)
+        return self
 
 @dataclass
 class Image:
@@ -62,6 +63,7 @@ class Image:
 
     def __post_init__(self):
         self.dim: Vector2 = Vector2.from_shape(self.data.shape)
+        return self
     
     def get_rel(self, abs: Vector2) -> Vector2:
         # abs.x and abs.y is aboslute position (0 - 1)
@@ -131,6 +133,17 @@ class BoundingBox:
     center: Vector2 # abs
     dim: Vector2 # abs
     symbol: Symbol
+
+    def __post_init__(self):
+        self.tl = Vector2(self.center.x - (self.dim.x / 2), self.center.y - (self.dim.y / 2))
+        self.br = Vector2(self.center.x + (self.dim.x / 2), self.center.y + (self.dim.y / 2))
+        return self
+
+    def overlap(self, other: Self) -> bool:
+        return not (self.tl.x > other.br.x
+                    or self.br.x < other.tl.x
+                    or self.tl.y < other.br.y
+                    or self.br.y > other.tl.y)
 
     def to_yolo_format(self) -> str:
         return f"{self.symbol.id} {self.center.x:.6f} {self.center.y:.6f} {self.dim.x:.6f} {self.dim.y:.6f}"
