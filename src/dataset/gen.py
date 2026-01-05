@@ -2,14 +2,17 @@
 Generate architectural datasets for symbol detection
 
 1. grab images from architectural pdfs
+2. hough line transform to detect walls/pipes
 
 TODO:
 2. add symbols randomly to architectural pdfs, resembling real architectural documents.
-    - hough line transform to detect walls/pipes.
     - strategically place T symbols (thermostats) along walls
     - place bowties (valves??) on pipelines
     - Keynotes: probably just good to put them randomly
 3. Generate in YOLO format
+4. write documentation :P
+5. split into more files, shouldn't clup everything in one file
+6. (if i have extra time) yaml config file to setup hough params and general config stuff 
 
 - Chenghao Li
 """
@@ -113,8 +116,40 @@ class Symbol(Image):
         data = cv2.imread(path)
         name = os.path.basename(path)
         return cls(name=name, data=data, placement=placement)
+    
+    def transform(self, scale: float=1, rotation: float=0) -> Self:
+        # copy of symbol w/ given scale and rotation
+        img = self.data.copy()
 
+        if scale != 1.0:
+            new_width = int(img.shape[1] * scale)
+            new_height = int(img.shape[0] * scale)
+            if new_width > 0 and new_height > 0:
+                img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        
+        if rotation != 0.0:
+            h, w = img.shape[:2]
+            center = (w // 2, h // 2)
+            rotation_matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+            cos = abs(rotation_matrix[0, 0])
+            sin = abs(rotation_matrix[0, 1])
+            new_w = int(h * sin + w * cos)
+            new_h = int(h * cos + w * sin)
+            rotation_matrix[0, 2] += (new_w - w) / 2
+            rotation_matrix[1, 2] += (new_h - h) / 2
 
+            # fill bg based on alpha channel
+            if img.shape[2] == 4:
+                img = cv2.warpAffine(img, rotation_matrix, (new_w, new_h),
+                                     borderMode=cv2.BORDER_CONSTANT,
+                                     borderValue=(255, 255, 255, 0))
+            else:
+                img = cv2.warpAffine(img, rotation_matrix, (new_w, new_h),
+                                     borderMode=cv2.BORDER_CONSTANT,
+                                     borderValue=(255, 255, 255))
+
+        return Symbol(name=self.name, data=img, placement=self.placement)
+        
 
 class DatasetGenerator:
     def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2=IMAGE_SIZE):
