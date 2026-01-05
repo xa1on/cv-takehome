@@ -25,6 +25,14 @@ import cv2
 import numpy as np
 from pdf2image import convert_from_path
 
+@dataclass
+class Vector2:
+    x: int
+    y: int
+
+    def to_tuple(self) -> tuple[int, int]:
+        return self.x, self.y
+
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
 SYMBOLS_DIR = os.path.join(DIR_PATH, "../../symbols")
@@ -33,6 +41,9 @@ BACKGROUNDS_DIR = os.path.join(DIR_PATH, "../../architecture")
 DATA_DIR = os.path.join(DIR_PATH, "../../data")
 EXTRACTED_IMG_DIR = os.path.join(DATA_DIR, "extracted_arch")
 OUTPUT_DIR = os.path.join(DATA_DIR, "dataset")
+
+# CONFIG:
+IMAGE_SIZE = Vector2(x=2000, y=2832)
 
 # LINE DETECTION ARGS
 CANNY_THRESHOLD_1 = 50
@@ -63,14 +74,10 @@ CLASS_PLACEMENT = {
 }
 
 
-@dataclass
-class Vector2:
-    x: int
-    y: int
+
 
 @dataclass
 class DetectedLine:
-    """Represents a line in the image"""
     x1: int
     y1: int
     x2: int
@@ -85,6 +92,9 @@ class DetectedLine:
 class Image:
     name: str
     data: np.array
+
+    def resize(self, new: Vector2) -> None:
+        self.data = cv2.resize(self.data, new.to_tuple())
 
 @dataclass
 class Background(Image):
@@ -107,7 +117,7 @@ class Symbol(Image):
 
 
 class DatasetGenerator:
-    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2=IMAGE_SIZE):
         self.symbols: list[Symbol] = symbols
         self.backgrounds: list[Background] = backgrounds 
         self.output_dir: Path = Path(output_dir)
@@ -119,34 +129,27 @@ class DatasetGenerator:
         self.labels_dir.mkdir(parents=True, exist_ok=True)
     
     @classmethod
-    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=IMAGE_SIZE):
         # use when you already extracted pdf images
         backgrounds = extract_backgrounds(backgrounds_dir)
         symbols = extract_symbols(symbols_dir)
         return cls(symbols, backgrounds, output_dir, image_size)
 
     @classmethod
-    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=IMAGE_SIZE):
         # use if pdf images aren't extracted
-        backgrounds = extract_pdfs(backgrounds_dir)
+        backgrounds = extract_pdfs(backgrounds_dir, image_size=image_size)
         symbols = extract_symbols(symbols_dir)
         return cls(symbols, backgrounds, output_dir, image_size)
 
-def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Background]:
-    """
-    get images from a pdf at path
-    
-    :param path: path of pdf
-    :type path: str
-    :param output: output dir
-    :type path: str
-    :return: list of resulting images
-    :rtype: list[Background]
-    """
+
+
+def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR, image_size: Vector2=IMAGE_SIZE) -> list[Background]:
     result: list[Background] = []
     for i, page in enumerate(convert_from_path(path)):
         name = f"{os.path.basename(path)}-p{i}.png"
         data = np.array(page)
+        data = cv2.resize(data, image_size.to_tuple())
         result.append(
             Background(name=name, data=data, lines=detect_lines(data))
         )
@@ -154,20 +157,12 @@ def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Background
         cv2.imwrite(result_path, np.array(page))
     return result
 
-def extract_pdfs(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Image]:
-    """
-    extract images from all pdfs in path
-    
-    :param path: path of dir w/ pdfs
-    :type path: str
-    :param output: output dir
-    :type output: str
-    :return: list of paths to resulting images
-    :rtype: list[Image]
-    """
-    result: list[Image] = []
+
+
+def extract_pdfs(path: str, output: str=EXTRACTED_IMG_DIR, image_size: Vector2=IMAGE_SIZE) -> list[Background]:
+    result: list[Background] = []
     for file in list(Path(path).glob('*.pdf')):
-        result += extract_pdf_img(str(file), output)
+        result += extract_pdf_img(str(file), output, image_size)
     return result
 
 # some of this code is kind of repeated, but wtv
@@ -193,14 +188,6 @@ def extract_symbols(path: str) -> list[Symbol]:
 
 
 def detect_lines(img: np.array) -> list[DetectedLine]:
-    """
-    detect lines in image
-    
-    :param img: image to detect from
-    :type img: np.array
-    :return: list of lines detected
-    :rtype: list[DetectedLine]
-    """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (GAUSSIAN_BLUR, GAUSSIAN_BLUR), 0)
     edges = cv2.Canny(blurred, CANNY_THRESHOLD_1, CANNY_THRESHOLD_2)
@@ -226,18 +213,6 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
     return detected_lines
 
 def filter_lines(lines: list[DetectedLine], dim: tuple[int, int, int], scale: float) -> list[DetectedLine]:
-    """
-    filter out lines not within a certain amount of the edge
-    
-    :param lines: list of lines
-    :type lines: list[DetectedLine]
-    :param dim: dimension of image
-    :type dim: tuple[int, int, int]
-    :param scale: scale from 0 - 1 for the threshold of lines ignored
-    :type scale: float
-    :return: filtered lines
-    :rtype: list[DetectedLine]
-    """
     result = []
     for line in lines:
         if line.midpoint.x > dim[1] * (scale / 2) and line.midpoint.x < dim[1] * (1 - (scale / 2)) and line.midpoint.y > dim[0] * (scale / 2) and line.midpoint.y < dim[0] * (1 - (scale / 2)):
