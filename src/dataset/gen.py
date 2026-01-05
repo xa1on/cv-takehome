@@ -87,6 +87,14 @@ class Image:
     data: np.array
 
 @dataclass
+class Background(Image):
+    lines: DetectedLine
+
+    @classmethod
+    def from_img(cls, img: Image):
+        cls(name=img.name, data=img.data, lines=detect_lines(img.data))
+
+@dataclass
 class Symbol(Image):
     placement: PlacementMode
 
@@ -99,9 +107,9 @@ class Symbol(Image):
 
 
 class DatasetGenerator:
-    def __init__(self, symbols: list[Symbol], backgrounds: list[Image], output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
         self.symbols: list[Symbol] = symbols
-        self.backgrounds: list[Image] = backgrounds 
+        self.backgrounds: list[Background] = backgrounds 
         self.output_dir: Path = Path(output_dir)
         self.image_size: Vector2 = image_size
         self.images_dir = os.path.join(self.output_dir, 'images')
@@ -112,17 +120,19 @@ class DatasetGenerator:
     
     @classmethod
     def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
-        backgrounds = extract_images(backgrounds_dir)
+        # use when you already extracted pdf images
+        backgrounds = extract_backgrounds(backgrounds_dir)
         symbols = extract_symbols(symbols_dir)
         return cls(symbols, backgrounds, output_dir, image_size)
 
     @classmethod
     def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+        # use if pdf images aren't extracted
         backgrounds = extract_pdfs(backgrounds_dir)
         symbols = extract_symbols(symbols_dir)
         return cls(symbols, backgrounds, output_dir, image_size)
 
-def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Image]:
+def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Background]:
     """
     get images from a pdf at path
     
@@ -131,13 +141,14 @@ def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Image]:
     :param output: output dir
     :type path: str
     :return: list of resulting images
-    :rtype: list[Image]
+    :rtype: list[Background]
     """
-    result: list[Image] = []
+    result: list[Background] = []
     for i, page in enumerate(convert_from_path(path)):
         name = f"{os.path.basename(path)}-p{i}.png"
+        data = np.array(page)
         result.append(
-            Image(name=name, data=np.array(page))
+            Background(name=name, data=data, lines=detect_lines(data))
         )
         result_path = os.path.join(output, name)
         cv2.imwrite(result_path, np.array(page))
@@ -159,10 +170,18 @@ def extract_pdfs(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Image]:
         result += extract_pdf_img(str(file), output)
     return result
 
+# some of this code is kind of repeated, but wtv
 def extract_images(path: str) -> list[Image]:
     result: list[Image] = []
     for file in list(Path(path).glob('*.png')):
         result.append(Image(name=file.stem, data=cv2.imread(str(file))))
+    return result
+
+def extract_backgrounds(path: str) -> list[Image]:
+    result: list[Background] = []
+    for file in list(Path(path).glob('*.png')):
+        data = cv2.imread(str(file))
+        result.append(Background(name=file.stem, data=data, lines=detect_lines(data)))
     return result
 
 def extract_symbols(path: str) -> list[Symbol]:
