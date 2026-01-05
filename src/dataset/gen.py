@@ -16,19 +16,14 @@ TODO:
 
 import os
 import math
+from enum import Enum
+from typing import Self
 from pathlib import Path
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
 from pdf2image import convert_from_path
-
-CANNY_THRESHOLD_1 = 50
-CANNY_THRESHOLD_2 = 150
-
-HOUGH_THRESHOLD = 100
-MIN_LINE_LENGTH = 50
-MAX_LINE_GAP = 10
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
@@ -37,6 +32,36 @@ BACKGROUNDS_DIR = os.path.join(DIR_PATH, "../../architecture")
 
 DATA_DIR = os.path.join(DIR_PATH, "../../data")
 EXTRACTED_IMG_DIR = os.path.join(DATA_DIR, "extracted_arch")
+OUTPUT_DIR = os.path.join(DATA_DIR, "dataset")
+
+# LINE DETECTION ARGS
+CANNY_THRESHOLD_1 = 50
+CANNY_THRESHOLD_2 = 175
+
+HOUGH_THRESHOLD = 50
+MIN_LINE_LENGTH = 75
+MAX_LINE_GAP = 3
+
+GAUSSIAN_BLUR = 5
+
+class PlacementMode(Enum):
+    RANDOM = 1
+    ON_LINE = 2
+    NEXT_TO_LINE = 3
+
+# need to configure if adding more symbols
+CLASS_IDS = {
+    'bowtie': 0,
+    'keynote': 1,
+    'T_Symbol': 2
+}
+
+CLASS_PLACEMENT = {
+    'bowtie': PlacementMode.ON_LINE,
+    'keynote': PlacementMode.RANDOM,
+    'T_Symbol': PlacementMode.NEXT_TO_LINE
+}
+
 
 @dataclass
 class Vector2:
@@ -56,7 +81,48 @@ class DetectedLine:
         self.length: float = math.sqrt((self.x2 - self.x1) ** 2 + (self.y2 - self.y1) ** 2)
         self.midpoint: Vector2 = Vector2(x=(self.x1 + self.x2) // 2, y=(self.y1 + self.y2) // 2)
 
-def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[str]:
+@dataclass
+class Image:
+    name: str
+    data: np.array
+
+@dataclass
+class Symbol(Image):
+    placement: PlacementMode
+
+    @classmethod
+    def from_path(cls, path: str, placement: PlacementMode) -> Self:
+        data = cv2.imread(path)
+        name = os.path.basename(path)
+        return cls(name=name, data=data, placement=placement)
+
+
+
+class DatasetGenerator:
+    def __init__(self, symbols: list[Symbol], backgrounds: list[Image], output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+        self.symbols: list[Symbol] = symbols
+        self.backgrounds: list[Image] = backgrounds 
+        self.output_dir: Path = Path(output_dir)
+        self.image_size: Vector2 = image_size
+        self.images_dir = os.path.join(self.output_dir, 'images')
+        self.labels_dir = os.path.join(self.output_dir, 'labels')
+
+        self.images_dir.mkdir(parents=True, exist_ok=True)
+        self.labels_dir.mkdir(parents=True, exist_ok=True)
+    
+    @classmethod
+    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+        backgrounds = extract_images(backgrounds_dir)
+        symbols = extract_symbols(symbols_dir)
+        return cls(symbols, backgrounds, output_dir, image_size)
+
+    @classmethod
+    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=Vector2(x=2000, y=2832)):
+        backgrounds = extract_pdfs(backgrounds_dir)
+        symbols = extract_symbols(symbols_dir)
+        return cls(symbols, backgrounds, output_dir, image_size)
+
+def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Image]:
     """
     get images from a pdf at path
     
@@ -64,17 +130,20 @@ def extract_pdf_img(path: str, output: str=EXTRACTED_IMG_DIR) -> list[str]:
     :type path: str
     :param output: output dir
     :type path: str
-    :return: list of paths of resulting images
-    :rtype: list[str]
+    :return: list of resulting images
+    :rtype: list[Image]
     """
-    result: list[str] = []
+    result: list[Image] = []
     for i, page in enumerate(convert_from_path(path)):
-        result_path = os.path.join(output, f"{os.path.basename(path)}-p{i}.png")
+        name = f"{os.path.basename(path)}-p{i}.png"
+        result.append(
+            Image(name=name, data=np.array(page))
+        )
+        result_path = os.path.join(output, name)
         cv2.imwrite(result_path, np.array(page))
-        result.append(result_path)
     return result
 
-def extract_pdfs(path: str, output: str=EXTRACTED_IMG_DIR) -> list[str]:
+def extract_pdfs(path: str, output: str=EXTRACTED_IMG_DIR) -> list[Image]:
     """
     extract images from all pdfs in path
     
@@ -83,12 +152,26 @@ def extract_pdfs(path: str, output: str=EXTRACTED_IMG_DIR) -> list[str]:
     :param output: output dir
     :type output: str
     :return: list of paths to resulting images
-    :rtype: list[str]
+    :rtype: list[Image]
     """
-    result: list[str] = []
+    result: list[Image] = []
     for file in list(Path(path).glob('*.pdf')):
         result += extract_pdf_img(str(file), output)
     return result
+
+def extract_images(path: str) -> list[Image]:
+    result: list[Image] = []
+    for file in list(Path(path).glob('*.png')):
+        result.append(Image(name=file.stem, data=cv2.imread(str(file))))
+    return result
+
+def extract_symbols(path: str) -> list[Symbol]:
+    result: list[Symbol] = []
+    for file in list(Path(path).glob('*.png')):
+        new_symbol = Symbol(name=file.stem, data=cv2.imread(str(file)), placement=CLASS_PLACEMENT[file.stem])
+        result.append(new_symbol)
+    return result
+
 
 def detect_lines(img: np.array) -> list[DetectedLine]:
     """
@@ -100,7 +183,7 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
     :rtype: list[DetectedLine]
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    blurred = cv2.GaussianBlur(gray, (GAUSSIAN_BLUR, GAUSSIAN_BLUR), 0)
     edges = cv2.Canny(blurred, CANNY_THRESHOLD_1, CANNY_THRESHOLD_2)
 
     lines = cv2.HoughLinesP(
@@ -143,12 +226,14 @@ def filter_lines(lines: list[DetectedLine], dim: tuple[int, int, int], scale: fl
     return result
 
 def main():
-    img = cv2.imread(os.path.join(EXTRACTED_IMG_DIR, "OCM081.1.08.18.pdf-p0.png"))
+    extract_symbols(SYMBOLS_DIR)
+    # example line detection
+    img = cv2.imread(os.path.join(EXTRACTED_IMG_DIR, "PL24.095-Architectural-Plans.pdf-p1.png"))
     lines = detect_lines(img)
-    filtered_lines = filter_lines(lines, img.shape, 0.2)
+    filtered_lines = filter_lines(lines, img.shape, 0.15)
     for line in filtered_lines:
         cv2.line(img, (line.x1, line.y1), (line.x2, line.y2), (0, 0, 255), 2)
-    final_img = cv2.resize(img, (1600, 900))
+    final_img = cv2.resize(img, (img.shape[1] // 4, img.shape[0] // 4))
     cv2.imshow("lines", final_img)
     cv2.waitKey(0)
 
