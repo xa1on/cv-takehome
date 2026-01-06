@@ -110,8 +110,8 @@ class Symbol(Image):
             new_width = int(img.shape[1] * scale)
             new_height = int(img.shape[0] * scale)
             if new_width > 0 and new_height > 0:
-                img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
-        
+                img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+
         if rotation != 0.0:
             h, w = img.shape[:2]
             center = (w // 2, h // 2)
@@ -126,10 +126,12 @@ class Symbol(Image):
             # fill bg based on alpha channel
             if img.shape[2] == 4:
                 img = cv2.warpAffine(img, rotation_matrix, (new_w, new_h),
+                                     flags=cv2.INTER_NEAREST,
                                      borderMode=cv2.BORDER_CONSTANT,
                                      borderValue=(255, 255, 255, 0))
             else:
                 img = cv2.warpAffine(img, rotation_matrix, (new_w, new_h),
+                                     flags=cv2.INTER_NEAREST,
                                      borderMode=cv2.BORDER_CONSTANT,
                                      borderValue=(255, 255, 255))
 

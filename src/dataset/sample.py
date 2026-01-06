@@ -26,8 +26,8 @@ LINE_RATIO_MAX_NEXT_TO = 0.85
 
 # Symbol scale ranges (relative to image size)
 SCALE_RANGE_ON_LINE = (0.02, 0.10)
-SCALE_RANGE_NEXT_TO_LINE = (0.02, 0.10)
-SCALE_RANGE_RANDOM = (0.02, 0.10)
+SCALE_RANGE_NEXT_TO_LINE = (0.04, 0.10)
+SCALE_RANGE_RANDOM = (0.04, 0.10)
 
 # Perpendicular offset range for NEXT_TO_LINE placement (pixels)
 PERPENDICULAR_OFFSET_RANGE = (30, 80)
