@@ -278,7 +278,7 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
     )
 
     detected_lines: list[DetectedLine] = []
-    if len(lines):
+    if not lines is None:
         for line in lines:
             x1, y1, x2, y2 = line[0]
             detected_lines.append(
@@ -292,54 +292,75 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
 
     return detected_lines
 
-def filter_lines(lines: list[DetectedLine], dim: Vector2, scale: float) -> list[DetectedLine]:
-    """
-    filter lines to keep only those within margin from edges
 
-    :param lines: list of detected lines
-    :type lines: list[DetectedLine]
-    :param dim: image dimensions
-    :type dim: Vector2
-    :param scale: margin scale (0-1), lines within scale/2 from edge are removed
-    :type scale: float
-    :return: filtered list of lines
-    :rtype: list[DetectedLine]
-    """
-    result = []
-    for line in lines:
-        if line.midpoint.x > dim.x * (scale / 2) and line.midpoint.x < dim.x * (1 - (scale / 2)) and line.midpoint.y > dim.y * (scale / 2) and line.midpoint.y < dim.y * (1 - (scale / 2)):
-            result.append(line)
-    logger.info(f"Filtered to keep {len(result)} lines.")
-    return result
 
-def extract_pdf_img(path: str, output: str, image_size: Vector2) -> list[Background]:
+def tile_background(background: Background, tile_size: Vector2, margin: float = 0.15) -> list[Background]:
     """
-    extract pages from a single PDF as background images
+    tile a background image into smaller chunks, ignoring margins
+    :param background: the background image to tile
+    :type background: Background
+    :param tile_size: the size of each tile
+    :type tile_size: Vector2
+    :param margin: the percentage of the image to ignore around the edges (0.0 to 1.0)
+    :type margin: float
+    :return: a list of background tiles
+    :rtype: list[Background]
+    """
+    tiles: list[Background] = []
+    img_dim = background.dim
+    # define margins
+    margin_x = int(img_dim.x * margin)
+    margin_y = int(img_dim.y * margin)
+    # crop image to the area within margins
+    cropped_data = background.data[margin_y:img_dim.y-margin_y, margin_x:img_dim.x-margin_x]
+    cropped_dim = Vector2.from_shape(cropped_data.shape)
+    for y in range(0, cropped_dim.y, tile_size.y):
+        for x in range(0, cropped_dim.x, tile_size.x):
+            tile_data = cropped_data[y:y+tile_size.y, x:x+tile_size.x]
+            if tile_data.shape[0] != tile_size.y or tile_data.shape[1] != tile_size.x:
+                continue
+            tile_name = f"{background.name}-tile-{x+margin_x}-{y+margin_y}.png"
+            lines = detect_lines(tile_data)
+            if lines:
+                tile_background = Background(name=tile_name, data=tile_data, lines=lines)
+                tiles.append(tile_background)
+    logger.info(f"Tiled {background.name} into {len(tiles)} tiles.")
+    return tiles
+
+def extract_pdf_img(path: str, output: str, tile_size: Vector2) -> list[Background]:
+    """
+    extract pages from a single PDF as background images, then tile them
 
     :param path: path to PDF file
     :type path: str
     :param output: directory to save extracted images
     :type output: str
-    :param image_size: target image dimensions
-    :type image_size: Vector2
-    :return: list of Background objects
+    :param tile_size: the size of each tile
+    :type tile_size: Vector2
+    :return: list of Background objects for each tile
     :rtype: list[Background]
     """
     result: list[Background] = []
     for i, page in enumerate(convert_from_path(path)):
-        name = f"{os.path.basename(path)}-p{i}.png"
+        name = f"{os.path.basename(path)}-p{i}"
         data = cv2.cvtColor(np.array(page), cv2.COLOR_RGB2BGR)
-        data = cv2.resize(data, (image_size.y, image_size.x))
-        result.append(
-            Background(name=name, data=data, lines=detect_lines(data))
-        )
-        result_path = os.path.join(output, name)
-        cv2.imwrite(result_path, data)
-    logger.info(f"Extracted {len(result)} background images from {path}.")
+        
+        # create a single background for the whole page to tile it
+        page_background = Background(name=name, data=data, lines=[]) # No need to detect lines on the whole page
+        
+        # tile the background
+        tiles = tile_background(page_background, tile_size)
+        
+        for tile in tiles:
+            result_path = os.path.join(output, tile.name)
+            cv2.imwrite(result_path, tile.data)
+            result.append(tile)
+
+    logger.info(f"Extracted and tiled {len(result)} background images from {path}.")
     return result
 
 
-def extract_pdfs(path: str, output: str, image_size: Vector2) -> list[Background]:
+def extract_pdfs(path: str, output: str, tile_size: Vector2) -> list[Background]:
     """
     extract pages from all PDFs in directory as background images
 
@@ -347,14 +368,12 @@ def extract_pdfs(path: str, output: str, image_size: Vector2) -> list[Background
     :type path: str
     :param output: directory to save extracted images
     :type output: str
-    :param image_size: target image dimensions
-    :type image_size: Vector2
     :return: list of Background objects from all PDFs
     :rtype: list[Background]
     """
     result: list[Background] = []
     for file in list(Path(path).glob('*.pdf')):
-        result += extract_pdf_img(str(file), output, image_size)
+        result += extract_pdf_img(str(file), output, tile_size)
     logger.info(f"Extracted {len(result)} background images total from {path}.")
     return result
 

@@ -2,3 +2,4 @@ opencv-python
 numpy
 pdf2image
 ultralytics
+onnxruntime-directml

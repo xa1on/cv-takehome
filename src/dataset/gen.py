@@ -21,7 +21,7 @@ import cv2
 
 from .image import (
     Vector2, PlacementMode, Background, Symbol,
-    detect_lines, filter_lines, extract_pdfs, grab_backgrounds, grab_symbols
+    detect_lines, extract_pdfs, grab_backgrounds, grab_symbols
 )
 from .sample import Sample
 
@@ -35,8 +35,8 @@ DATA_DIR = os.path.join(DIR_PATH, "../../data")
 EXTRACTED_IMG_DIR = os.path.join(DATA_DIR, "extracted_arch")
 OUTPUT_DIR = os.path.join(DATA_DIR, "dataset")
 
-# Image configuration
-IMAGE_SIZE = Vector2(x=2000, y=2832)
+
+TILE_SIZE = Vector2(x=1024, y=1024)
 
 # Symbol class definitions (add new symbols here)
 CLASS_IDS = {
@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 class DatasetGenerator:
     """generates synthetic YOLO datasets by placing symbols on architectural backgrounds"""
 
-    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2 = IMAGE_SIZE):
+    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str):
         """
         initalize DatasetGenerator
         
@@ -84,13 +84,10 @@ class DatasetGenerator:
         :type backgrounds: list[Background]
         :param output_dir: output directory of the dataset
         :type output_dir: str
-        :param image_size: the size of the dataset images
-        :type image_size: Vector2
         """
         self.symbols = symbols
         self.backgrounds = backgrounds
         self.output_dir = Path(output_dir)
-        self.image_size = image_size
         self.images_dir = Path(os.path.join(self.output_dir, 'images'))
         self.labels_dir = Path(os.path.join(self.output_dir, 'labels'))
 
@@ -100,7 +97,7 @@ class DatasetGenerator:
         logger.info("Successfully initialized DatasetGenerator")
 
     @classmethod
-    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2 = IMAGE_SIZE):
+    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str):
         """
         create generator from existing PNG background images
 
@@ -110,17 +107,15 @@ class DatasetGenerator:
         :type backgrounds_dir: str
         :param output_dir: output directory for generated dataset
         :type output_dir: str
-        :param image_size: target image dimensions
-        :type image_size: Vector2
         :return: initialized DatasetGenerator
         :rtype: DatasetGenerator
         """
         backgrounds = grab_backgrounds(backgrounds_dir)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
-        return cls(symbols, backgrounds, output_dir, image_size)
+        return cls(symbols, backgrounds, output_dir)
 
     @classmethod
-    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, extract_output: str = EXTRACTED_IMG_DIR, image_size: Vector2 = IMAGE_SIZE):
+    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, extract_output: str = EXTRACTED_IMG_DIR, tile_size: Vector2 = TILE_SIZE):
         """
         create generator by extracting backgrounds from PDF files
 
@@ -132,15 +127,15 @@ class DatasetGenerator:
         :type output_dir: str
         :param extract_output: directory to save extracted PDF images
         :type extract_output: str
-        :param image_size: target image dimensions
-        :type image_size: Vector2
+        :param tile_size: the size of each tile
+        :type tile_size: Vector2
         :return: initialized DatasetGenerator
         :rtype: DatasetGenerator
         """
         Path(extract_output).mkdir(parents=True, exist_ok=True)
-        backgrounds = extract_pdfs(backgrounds_dir, extract_output, image_size)
+        backgrounds = extract_pdfs(backgrounds_dir, extract_output, tile_size)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
-        return cls(symbols, backgrounds, output_dir, image_size)
+        return cls(symbols, backgrounds, output_dir)
 
     def _get_symbol_by_placement(self, placement: PlacementMode):
         """
@@ -259,8 +254,7 @@ def demo_lines(path: str) -> None:
     """
     img = cv2.imread(path)
     lines = detect_lines(img)
-    filtered_lines = filter_lines(lines, Vector2.from_shape(img.shape), LINE_FILTER_SCALE)
-    for line in filtered_lines:
+    for line in lines:
         cv2.line(img, (line.p1.x, line.p1.y), (line.p2.x, line.p2.y), (0, 0, 255), 2)
     final_img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
     cv2.imshow("lines", final_img)
@@ -288,7 +282,7 @@ def demo_placement(background_path: str = None, save_path: str = None) -> None:
             backgrounds = grab_backgrounds(EXTRACTED_IMG_DIR)
         else:
             Path(EXTRACTED_IMG_DIR).mkdir(parents=True, exist_ok=True)
-            backgrounds = extract_pdfs(BACKGROUNDS_DIR, EXTRACTED_IMG_DIR, IMAGE_SIZE)
+            backgrounds = extract_pdfs(BACKGROUNDS_DIR, EXTRACTED_IMG_DIR, TILE_SIZE)
         background = random.choice(backgrounds)
 
     sample = Sample(name=background.name, data=background.data.copy(), lines=background.lines)
@@ -342,6 +336,7 @@ def main():
     print(f"Train samples: {stats['train']}")
     print(f"Val samples: {stats['val']}")
     print(f"Total symbols: {stats['total_symbols']}")
+
 
 
 if __name__ == "__main__":
