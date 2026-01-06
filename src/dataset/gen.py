@@ -20,7 +20,7 @@ from pathlib import Path
 import cv2
 
 from .image import (
-    Vector2, PlacementMode, Background,
+    Vector2, PlacementMode, Background, Symbol,
     detect_lines, filter_lines, extract_pdfs, grab_backgrounds, grab_symbols
 )
 from .sample import Sample
@@ -71,7 +71,22 @@ logger = logging.getLogger(__name__)
 
 
 class DatasetGenerator:
-    def __init__(self, symbols, backgrounds, output_dir: str, image_size: Vector2 = IMAGE_SIZE):
+    """generates synthetic YOLO datasets by placing symbols on architectural backgrounds"""
+
+    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2 = IMAGE_SIZE):
+        """
+        initalize DatasetGenerator
+        
+        :param self:
+        :param symbols: list of symbols
+        :type symbols: list[Symbol]
+        :param backgrounds: list of backgrounds
+        :type backgrounds: list[Background]
+        :param output_dir: output directory of the dataset
+        :type output_dir: str
+        :param image_size: the size of the dataset images
+        :type image_size: Vector2
+        """
         self.symbols = symbols
         self.backgrounds = backgrounds
         self.output_dir = Path(output_dir)
@@ -86,18 +101,56 @@ class DatasetGenerator:
 
     @classmethod
     def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2 = IMAGE_SIZE):
+        """
+        create generator from existing PNG background images
+
+        :param symbols_dir: directory containing symbol PNG files
+        :type symbols_dir: str
+        :param backgrounds_dir: directory containing background PNG files
+        :type backgrounds_dir: str
+        :param output_dir: output directory for generated dataset
+        :type output_dir: str
+        :param image_size: target image dimensions
+        :type image_size: Vector2
+        :return: initialized DatasetGenerator
+        :rtype: DatasetGenerator
+        """
         backgrounds = grab_backgrounds(backgrounds_dir)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
         return cls(symbols, backgrounds, output_dir, image_size)
 
     @classmethod
     def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, extract_output: str = EXTRACTED_IMG_DIR, image_size: Vector2 = IMAGE_SIZE):
+        """
+        create generator by extracting backgrounds from PDF files
+
+        :param symbols_dir: directory containing symbol PNG files
+        :type symbols_dir: str
+        :param backgrounds_dir: directory containing PDF files to extract
+        :type backgrounds_dir: str
+        :param output_dir: output directory for generated dataset
+        :type output_dir: str
+        :param extract_output: directory to save extracted PDF images
+        :type extract_output: str
+        :param image_size: target image dimensions
+        :type image_size: Vector2
+        :return: initialized DatasetGenerator
+        :rtype: DatasetGenerator
+        """
         Path(extract_output).mkdir(parents=True, exist_ok=True)
         backgrounds = extract_pdfs(backgrounds_dir, extract_output, image_size)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
         return cls(symbols, backgrounds, output_dir, image_size)
 
     def _get_symbol_by_placement(self, placement: PlacementMode):
+        """
+        return a random symbol matching the given placement mode
+
+        :param placement: the placement mode to filter by
+        :type placement: PlacementMode
+        :return: random matching symbol or None if no match
+        :rtype: Symbol | None
+        """
         matching = [s for s in self.symbols if s.placement == placement]
         return random.choice(matching) if matching else None
 
@@ -105,6 +158,20 @@ class DatasetGenerator:
                         num_on_line: tuple[int, int] = NUM_ON_LINE_RANGE,
                         num_next_to_line: tuple[int, int] = NUM_NEXT_TO_LINE_RANGE,
                         num_random: tuple[int, int] = NUM_RANDOM_RANGE) -> Sample:
+        """
+        generate a single sample with symbols placed on background
+
+        :param background: the background image to place symbols on
+        :type background: Background
+        :param num_on_line: range (min, max) of ON_LINE symbols to place
+        :type num_on_line: tuple[int, int]
+        :param num_next_to_line: range (min, max) of NEXT_TO_LINE symbols to place
+        :type num_next_to_line: tuple[int, int]
+        :param num_random: range (min, max) of RANDOM symbols to place
+        :type num_random: tuple[int, int]
+        :return: generated sample with placed symbols
+        :rtype: Sample
+        """
         sample = Sample(name=background.name, data=background.data.copy(), lines=background.lines)
 
         for placement, count_range in [
@@ -121,6 +188,16 @@ class DatasetGenerator:
         return sample
 
     def generate_dataset(self, num_samples: int = DEFAULT_NUM_SAMPLES, train_split: float = DEFAULT_TRAIN_SPLIT) -> dict[str, int]:
+        """
+        generate full dataset with train/val split
+
+        :param num_samples: total number of samples to generate
+        :type num_samples: int
+        :param train_split: fraction of samples for training (0-1)
+        :type train_split: float
+        :return: statistics dict with train, val, and total_symbols counts
+        :rtype: dict[str, int]
+        """
         for split in ['train', 'val']:
             (self.images_dir / split).mkdir(exist_ok=True)
             (self.labels_dir / split).mkdir(exist_ok=True)
@@ -174,6 +251,12 @@ nc: {len(CLASS_IDS)}
 
 
 def demo_lines(path: str) -> None:
+    """
+    visualize detected lines on an image
+
+    :param path: path to the image file
+    :type path: str
+    """
     img = cv2.imread(path)
     lines = detect_lines(img)
     filtered_lines = filter_lines(lines, Vector2.from_shape(img.shape), LINE_FILTER_SCALE)
@@ -185,6 +268,14 @@ def demo_lines(path: str) -> None:
 
 
 def demo_placement(background_path: str = None, save_path: str = None) -> None:
+    """
+    demo symbol placement with bounding box visualization
+
+    :param background_path: optional path to specific background image
+    :type background_path: str | None
+    :param save_path: optional path to save visualization
+    :type save_path: str | None
+    """
     symbols = grab_symbols(SYMBOLS_DIR, CLASS_IDS, CLASS_PLACEMENT)
 
     if background_path:

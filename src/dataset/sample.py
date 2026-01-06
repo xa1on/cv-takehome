@@ -10,35 +10,35 @@ import numpy as np
 
 from .image import Background, BoundingBox, Symbol, Vector2, PlacementMode
 
-# Placement configuration constants
+# placement configuration constants
 MAX_PLACEMENT_ATTEMPTS = 20
 MAX_RANDOM_PLACEMENT_ATTEMPTS = 30
 
-# Line filtering thresholds (minimum line length in pixels)
+# line filtering thresholds (minimum line length in pixels)
 MIN_LINE_LENGTH_ON = 100
 MIN_LINE_LENGTH_NEXT_TO = 80
 
-# Position along line (ratio 0-1, avoiding endpoints)
+# position along line (ratio 0-1, avoiding endpoints)
 LINE_RATIO_MIN_ON = 0.2
 LINE_RATIO_MAX_ON = 0.8
 LINE_RATIO_MIN_NEXT_TO = 0.15
 LINE_RATIO_MAX_NEXT_TO = 0.85
 
-# Symbol scale ranges (relative to image size)
+# symbol scale ranges (relative to image size)
 SCALE_RANGE_ON_LINE = (0.02, 0.10)
 SCALE_RANGE_NEXT_TO_LINE = (0.04, 0.10)
 SCALE_RANGE_RANDOM = (0.04, 0.10)
 
-# Perpendicular offset range for NEXT_TO_LINE placement (pixels)
+# perpendicular offset range for NEXT_TO_LINE placement
 PERPENDICULAR_OFFSET_RANGE = (30, 80)
 
-# Margin from image edge for random placement (pixels)
+# margin from image edge for random placement
 RANDOM_PLACEMENT_MARGIN = 50
 
-# Overlap detection margin (pixels)
+# overlap detection margin
 OVERLAP_MARGIN = 10
 
-# Visualization constants
+# visualization constants
 BBOX_COLORS = {
     0: (0, 0, 255),    # bowtie - red
     1: (0, 255, 0),    # keynote - green
@@ -50,12 +50,26 @@ LABEL_THICKNESS = 1
 
 @dataclass
 class Sample(Background):
+    """synthetic training sample with symbol placement and YOLO export"""
+
     def __post_init__(self):
         self.result: np.array = self.data.copy()
         self.bounding_boxes: list[BoundingBox] = []
         super().__post_init__()
 
     def _is_valid_position(self, position: Vector2, symbol: Symbol, margin: int = OVERLAP_MARGIN) -> bool:
+        """
+        check if position is valid (within bounds and no overlap)
+
+        :param position: pixel position to check
+        :type position: Vector2
+        :param symbol: symbol to place
+        :type symbol: Symbol
+        :param margin: extra margin around symbol for overlap detection
+        :type margin: int
+        :return: True if position is valid
+        :rtype: bool
+        """
         half_w = symbol.dim.x // 2 + margin
         half_h = symbol.dim.y // 2 + margin
 
@@ -74,6 +88,16 @@ class Sample(Background):
         return True
 
     def _overlay_symbol(self, symbol: Symbol, position: Vector2) -> bool:
+        """
+        overlay symbol onto result image and record bounding box
+
+        :param symbol: symbol to overlay
+        :type symbol: Symbol
+        :param position: center position in pixels
+        :type position: Vector2
+        :return: True if successful
+        :rtype: bool
+        """
         x = int(position.x - symbol.dim.x // 2)
         y = int(position.y - symbol.dim.y // 2)
 
@@ -100,7 +124,16 @@ class Sample(Background):
         return True
 
     def place_symbol_on_line(self, symbol: Symbol, scale_range: tuple[float, float] = SCALE_RANGE_ON_LINE) -> bool:
-        # place symbol ON a detected line, aligned with line direction
+        """
+        place symbol ON a detected line, aligned with line direction
+
+        :param symbol: symbol to place
+        :type symbol: Symbol
+        :param scale_range: (min, max) scale factor range
+        :type scale_range: tuple[float, float]
+        :return: True if placement successful
+        :rtype: bool
+        """
         if not self.lines:
             return False
 
@@ -122,7 +155,18 @@ class Sample(Background):
         return False
 
     def place_symbol_next_to_line(self, symbol: Symbol, scale_range: tuple[float, float] = SCALE_RANGE_NEXT_TO_LINE, offset_range: tuple[int, int] = PERPENDICULAR_OFFSET_RANGE) -> bool:
-        # place symbol NEAR a detected line but not on it
+        """
+        place symbol NEAR a detected line but not on it
+
+        :param symbol: symbol to place
+        :type symbol: Symbol
+        :param scale_range: (min, max) scale factor range
+        :type scale_range: tuple[float, float]
+        :param offset_range: (min, max) perpendicular offset in pixels
+        :type offset_range: tuple[int, int]
+        :return: True if placement successful
+        :rtype: bool
+        """
         if not self.lines:
             return False
 
@@ -147,7 +191,18 @@ class Sample(Background):
         return False
 
     def place_symbol_random(self, symbol: Symbol, scale_range: tuple[float, float] = SCALE_RANGE_RANDOM, margin: int = RANDOM_PLACEMENT_MARGIN) -> bool:
-        # Place symbol at random position within bounds
+        """
+        place symbol at random position within bounds
+
+        :param symbol: symbol to place
+        :type symbol: Symbol
+        :param scale_range: (min, max) scale factor range
+        :type scale_range: tuple[float, float]
+        :param margin: minimum distance from image edges in pixels
+        :type margin: int
+        :return: True if placement successful
+        :rtype: bool
+        """
         for _ in range(MAX_RANDOM_PLACEMENT_ATTEMPTS):
             x = random.randint(margin, int(self.dim.x) - margin)
             y = random.randint(margin, int(self.dim.y) - margin)
@@ -162,7 +217,14 @@ class Sample(Background):
         return False
 
     def place_symbol(self, symbol: Symbol) -> bool:
-        # Place symbol based on placement mode
+        """
+        place symbol based on its placement mode
+
+        :param symbol: symbol to place
+        :type symbol: Symbol
+        :return: True if placement successful
+        :rtype: bool
+        """
         if symbol.placement == PlacementMode.ON_LINE:
             return self.place_symbol_on_line(symbol)
         elif symbol.placement == PlacementMode.NEXT_TO_LINE:
@@ -171,14 +233,26 @@ class Sample(Background):
             return self.place_symbol_random(symbol)
 
     def save(self, image_path: str, label_path: str) -> None:
-        # saves to yolo format
+        """
+        save sample image and YOLO format labels
+
+        :param image_path: path to save image
+        :type image_path: str
+        :param label_path: path to save label file
+        :type label_path: str
+        """
         cv2.imwrite(image_path, self.result)
         with open(label_path, 'w') as f:
             for box in self.bounding_boxes:
                 f.write(box.to_yolo_format() + '\n')
 
     def draw_bounding_boxes(self) -> np.array:
-        # visaulize bounding boxes of placed signals
+        """
+        draw bounding boxes on image for visualization
+
+        :return: image with drawn bounding boxes and labels
+        :rtype: np.array
+        """
         vis = self.result.copy()
         for box in self.bounding_boxes:
             tl = self.get_rel(box.tl)
