@@ -55,6 +55,21 @@ class DetectedLine:
         self.length: float = math.sqrt((self.p2.x - self.p1.x) ** 2 + (self.p2.y - self.p1.y) ** 2)
         self.midpoint: Vector2 = Vector2(x=(self.p1.x + self.p2.x) // 2, y=(self.p1.y + self.p2.y) // 2)
 
+    def point_at_ratio(self, ratio: float) -> Vector2:
+        x = int(self.p1.x + ratio * (self.p2.x - self.p1.x))
+        y = int(self.p1.y + ratio * (self.p2.y - self.p1.y))
+        return Vector2(x, y)
+
+    def perpendicular_point(self, base_point: Vector2, distance: float) -> Vector2:
+        import random
+        perp_angle = math.radians(self.angle + 90)
+
+        if random.random() > 0.5:
+            perp_angle += math.pi
+        x = int(base_point.x + distance * math.cos(perp_angle))
+        y = int(base_point.y + distance * math.sin(perp_angle))
+        return Vector2(x, y)
+
 @dataclass
 class Image:
     name: str
@@ -156,7 +171,7 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
     )
 
     detected_lines: list[DetectedLine] = []
-    if lines:
+    if len(lines):
         for line in lines:
             x1, y1, x2, y2 = line[0]
             detected_lines.append(
@@ -183,7 +198,7 @@ def extract_pdf_img(path: str, output: str, image_size: Vector2) -> list[Backgro
     for i, page in enumerate(convert_from_path(path)):
         name = f"{os.path.basename(path)}-p{i}.png"
         data = cv2.cvtColor(np.array(page), cv2.COLOR_RGB2BGR)
-        data = cv2.resize(data, image_size.to_tuple())
+        data = cv2.resize(data, (image_size.y, image_size.x))
         result.append(
             Background(name=name, data=data, lines=detect_lines(data))
         )

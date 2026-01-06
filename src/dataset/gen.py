@@ -3,27 +3,27 @@ Generate architectural datasets for symbol detection
 
 1. grab images from architectural pdfs
 2. hough line transform to detect walls/pipes
-
-TODO:
-2. add symbols randomly to architectural pdfs, resembling real architectural documents.
-    - strategically place T symbols (thermostats) along walls
-    - place bowties (valves??) on pipelines
-    - Keynotes: probably just good to put them randomly
-3. Generate in YOLO format
-4. write documentation :P
+3. add symbols to architectural pdfs based on placement mode:
+    - bowties (valves): ON lines (pipelines)
+    - T symbols (thermostats): NEXT TO lines (walls)
+    - keynotes: RANDOM placement
+4. Generate in YOLO format
 
 - Chenghao Li
 """
 
-
 import os
+import random
 import logging
 from pathlib import Path
 
 import cv2
 
-
-from .image import *
+from .image import (
+    Vector2, PlacementMode, Background,
+    detect_lines, filter_lines, extract_pdfs, grab_backgrounds, grab_symbols
+)
+from .sample import Sample
 
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
@@ -35,10 +35,10 @@ DATA_DIR = os.path.join(DIR_PATH, "../../data")
 EXTRACTED_IMG_DIR = os.path.join(DATA_DIR, "extracted_arch")
 OUTPUT_DIR = os.path.join(DATA_DIR, "dataset")
 
-# CONFIG:
+# Image configuration
 IMAGE_SIZE = Vector2(x=2000, y=2832)
 
-# need to configure if adding more symbols
+# Symbol class definitions (add new symbols here)
 CLASS_IDS = {
     'bowtie': 0,
     'keynote': 1,
@@ -51,59 +51,31 @@ CLASS_PLACEMENT = {
     'T_Symbol': PlacementMode.NEXT_TO_LINE
 }
 
-# logging setup
+# Dataset generation parameters
+DEFAULT_NUM_SAMPLES = 100
+DEFAULT_TRAIN_SPLIT = 0.8
+LOG_INTERVAL = 10
+
+# Symbol count ranges per sample
+NUM_ON_LINE_RANGE = (4, 10)
+NUM_NEXT_TO_LINE_RANGE = (4, 10)
+NUM_RANDOM_RANGE = (4, 15)
+
+# Demo visualization parameters
+DEMO_SYMBOLS_PER_TYPE = (2, 5)
+DEMO_DISPLAY_SCALE = 0.5
+LINE_FILTER_SCALE = 0.15
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-@dataclass
-class Sample(Background):
-    def __post_init__(self):
-        self.result: np.array = self.data.copy()
-        self.bounding_boxes: list[BoundingBox] = []
-        super().__post_init__()
-
-    def _overlay_symbol(self, symbol: Symbol, position: Vector2) -> None:
-        # position is relative, as center
-        x = position.x - symbol.dim.x // 2
-        y = position.y - symbol.dim.y // 2
-
-        if symbol.data.shape[2] == 4:
-            # extract alpha channel
-            alpha = symbol.data[:, :, 3] / 255.0
-            alpha = alpha[:, :, np.newaxis]
-
-            # blend
-            roi = self.result[y:y + symbol.dim.y, x:x + symbol.dim.x]
-            blended = (alpha * symbol.data[:, :, :3] + (1 - alpha) * roi).astype(np.uint8)
-            self.result[y:y + symbol.dim.y, x:x + symbol.dim.x] = blended
-        else:
-            # simple overlay (with white as transparent)
-            gray_symbol = cv2.cvtColor(symbol.data, cv2.COLOR_BGR2GRAY)
-            _, mask = cv2.threshold(gray_symbol, 250, 255, cv2.THRESH_BINARY_INV)
-            mask_inv = cv2.bitwise_not(mask)
-
-            roi = self.result[y:y + symbol.dim.y, x:x + symbol.dim.x]
-            bg_part = cv2.bitwise_and(roi, roi, mask=mask_inv)
-            sym_part = cv2.bitwise_and(symbol.data, symbol.data, mask=mask)
-            self.result[y:y + symbol.dim.y, x:x + symbol.dim.x] = cv2.add(bg_part, sym_part)
-        
-        self.bounding_boxes.append(
-            BoundingBox(
-                center=self.get_abs(position),
-                dim=self.get_abs(symbol.dim),
-                symbol=symbol
-            )
-        )
-
-    
-
 
 class DatasetGenerator:
-    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str, image_size: Vector2=IMAGE_SIZE):
-        self.symbols: list[Symbol] = symbols
-        self.backgrounds: list[Background] = backgrounds 
-        self.output_dir: Path = Path(output_dir)
-        self.image_size: Vector2 = image_size
+    def __init__(self, symbols, backgrounds, output_dir: str, image_size: Vector2 = IMAGE_SIZE):
+        self.symbols = symbols
+        self.backgrounds = backgrounds
+        self.output_dir = Path(output_dir)
+        self.image_size = image_size
         self.images_dir = Path(os.path.join(self.output_dir, 'images'))
         self.labels_dir = Path(os.path.join(self.output_dir, 'labels'))
 
@@ -111,36 +83,174 @@ class DatasetGenerator:
         self.labels_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("Successfully initialized DatasetGenerator")
-    
+
     @classmethod
-    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2=IMAGE_SIZE):
-        # use when you already extracted pdf images
+    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, image_size: Vector2 = IMAGE_SIZE):
         backgrounds = grab_backgrounds(backgrounds_dir)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
         return cls(symbols, backgrounds, output_dir, image_size)
 
     @classmethod
-    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, extract_output: str=EXTRACTED_IMG_DIR, image_size: Vector2=IMAGE_SIZE):
-        # use if pdf images aren't extracted
+    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, extract_output: str = EXTRACTED_IMG_DIR, image_size: Vector2 = IMAGE_SIZE):
+        Path(extract_output).mkdir(parents=True, exist_ok=True)
         backgrounds = extract_pdfs(backgrounds_dir, extract_output, image_size)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
         return cls(symbols, backgrounds, output_dir, image_size)
 
+    def _get_symbol_by_placement(self, placement: PlacementMode):
+        matching = [s for s in self.symbols if s.placement == placement]
+        return random.choice(matching) if matching else None
+
+    def generate_sample(self, background: Background,
+                        num_on_line: tuple[int, int] = NUM_ON_LINE_RANGE,
+                        num_next_to_line: tuple[int, int] = NUM_NEXT_TO_LINE_RANGE,
+                        num_random: tuple[int, int] = NUM_RANDOM_RANGE) -> Sample:
+        sample = Sample(name=background.name, data=background.data.copy(), lines=background.lines)
+
+        for placement, count_range in [
+            (PlacementMode.ON_LINE, num_on_line),
+            (PlacementMode.NEXT_TO_LINE, num_next_to_line),
+            (PlacementMode.RANDOM, num_random)
+        ]:
+            symbol = self._get_symbol_by_placement(placement)
+            if symbol:
+                n = random.randint(*count_range)
+                placed = sum(1 for _ in range(n) if sample.place_symbol(symbol))
+                logger.debug(f"Placed {placed}/{n} {placement.name} symbols")
+
+        return sample
+
+    def generate_dataset(self, num_samples: int = DEFAULT_NUM_SAMPLES, train_split: float = DEFAULT_TRAIN_SPLIT) -> dict[str, int]:
+        for split in ['train', 'val']:
+            (self.images_dir / split).mkdir(exist_ok=True)
+            (self.labels_dir / split).mkdir(exist_ok=True)
+
+        num_train = int(num_samples * train_split)
+        stats = {'train': 0, 'val': 0, 'total_symbols': 0}
+
+        for i in range(num_samples):
+            split = 'train' if i < num_train else 'val'
+            background = random.choice(self.backgrounds)
+            sample = self.generate_sample(background)
+
+            image_path = str(self.images_dir / split / f"synthetic_{i:05d}.jpg")
+            label_path = str(self.labels_dir / split / f"synthetic_{i:05d}.txt")
+            sample.save(image_path, label_path)
+
+            stats[split] += 1
+            stats['total_symbols'] += len(sample.bounding_boxes)
+
+            if (i + 1) % LOG_INTERVAL == 0:
+                logger.info(f"Generated {i + 1}/{num_samples} samples")
+
+        self._generate_yaml()
+        logger.info(f"Dataset generation complete!")
+        logger.info(f"Train samples: {stats['train']}, Val samples: {stats['val']}")
+        logger.info(f"Total symbols placed: {stats['total_symbols']}")
+
+        return stats
+
+    def _generate_yaml(self) -> None:
+        names_lines = '\n'.join(f'  {id}: {name}' for name, id in sorted(CLASS_IDS.items(), key=lambda x: x[1]))
+
+        yaml_content = f"""# Synthetic Dataset for Symbol Detection
+# Auto-generated by gen.py
+
+path: {self.output_dir.absolute()}
+train: images/train
+val: images/val
+
+# Classes
+names:
+{names_lines}
+
+# Number of classes
+nc: {len(CLASS_IDS)}
+"""
+        yaml_path = self.output_dir / 'dataset.yaml'
+        with open(yaml_path, 'w') as f:
+            f.write(yaml_content)
+        logger.info(f"Generated dataset.yaml at {yaml_path}")
 
 
 def demo_lines(path: str) -> None:
     img = cv2.imread(path)
     lines = detect_lines(img)
-    filtered_lines = filter_lines(lines, Vector2.from_shape(img.shape), 0.15)
+    filtered_lines = filter_lines(lines, Vector2.from_shape(img.shape), LINE_FILTER_SCALE)
     for line in filtered_lines:
         cv2.line(img, (line.p1.x, line.p1.y), (line.p2.x, line.p2.y), (0, 0, 255), 2)
     final_img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
     cv2.imshow("lines", final_img)
     cv2.waitKey(0)
 
+
+def demo_placement(background_path: str = None, save_path: str = None) -> None:
+    symbols = grab_symbols(SYMBOLS_DIR, CLASS_IDS, CLASS_PLACEMENT)
+
+    if background_path:
+        data = cv2.imread(background_path)
+        name = os.path.basename(background_path)
+        lines = detect_lines(data)
+        background = Background(name=name, data=data, lines=lines)
+    else:
+        if os.path.exists(EXTRACTED_IMG_DIR) and list(Path(EXTRACTED_IMG_DIR).glob('*.png')):
+            backgrounds = grab_backgrounds(EXTRACTED_IMG_DIR)
+        else:
+            Path(EXTRACTED_IMG_DIR).mkdir(parents=True, exist_ok=True)
+            backgrounds = extract_pdfs(BACKGROUNDS_DIR, EXTRACTED_IMG_DIR, IMAGE_SIZE)
+        background = random.choice(backgrounds)
+
+    sample = Sample(name=background.name, data=background.data.copy(), lines=background.lines)
+
+    for symbol in symbols:
+        for _ in range(random.randint(*DEMO_SYMBOLS_PER_TYPE)):
+            sample.place_symbol(symbol)
+
+    vis = sample.draw_bounding_boxes()
+    display = cv2.resize(vis, (int(vis.shape[1] * DEMO_DISPLAY_SCALE), int(vis.shape[0] * DEMO_DISPLAY_SCALE)))
+
+    if save_path:
+        cv2.imwrite(save_path, vis)
+        logger.info(f"Saved demo visualization to {save_path}")
+
+    cv2.imshow("Symbol Placement Demo", display)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
 def main():
-    result = DatasetGenerator.from_pdfs(SYMBOLS_DIR, BACKGROUNDS_DIR, OUTPUT_DIR)
-    
+    # cli for easy use
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Generate synthetic training dataset')
+    parser.add_argument('--num-samples', type=int, default=100, help='Number of samples to generate')
+    parser.add_argument('--from-pdfs', action='store_true', help='Extract images from PDFs (default: use existing images)')
+    parser.add_argument('--demo-lines', type=str, help='Path to image for line detection demo')
+    parser.add_argument('--demo-placement', action='store_true', help='Demo symbol placement with bounding boxes')
+    parser.add_argument('--demo-bg', type=str, help='Background image for demo-placement (optional)')
+    parser.add_argument('--demo-save', type=str, help='Save path for demo visualization (optional)')
+
+    args = parser.parse_args()
+
+    if args.demo_lines:
+        demo_lines(args.demo_lines)
+        return
+
+    if args.demo_placement:
+        demo_placement(background_path=args.demo_bg, save_path=args.demo_save)
+        return
+
+    if args.from_pdfs:
+        generator = DatasetGenerator.from_pdfs(SYMBOLS_DIR, BACKGROUNDS_DIR, OUTPUT_DIR)
+    else:
+        generator = DatasetGenerator.from_imgs(SYMBOLS_DIR, EXTRACTED_IMG_DIR, OUTPUT_DIR)
+
+    stats = generator.generate_dataset(num_samples=args.num_samples)
+
+    print("Finished!")
+    print(f"Train samples: {stats['train']}")
+    print(f"Val samples: {stats['val']}")
+    print(f"Total symbols: {stats['total_symbols']}")
 
 
 if __name__ == "__main__":
