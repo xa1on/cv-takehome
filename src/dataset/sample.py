@@ -29,6 +29,7 @@ SCALE_RANGE_ON_LINE = (0.02, 0.15)
 SCALE_RANGE_NEXT_TO_LINE = (0.04, 0.30)
 SCALE_RANGE_RANDOM = (0.04, 0.30)
 
+
 # perpendicular offset range for NEXT_TO_LINE placement
 PERPENDICULAR_OFFSET_RANGE = (30, 80)
 
@@ -97,7 +98,7 @@ class Sample(Background):
 
     def _overlay_symbol(self, symbol: Symbol, position: Vector2) -> bool:
         """
-        overlay symbol onto result image and record bounding box
+        overlay symbol onto result image and record bounding box (unless hard negative)
 
         :param symbol: symbol to overlay
         :type symbol: Symbol
@@ -122,13 +123,16 @@ class Sample(Background):
             self.result[y:y + symbol.dim.y, x:x + symbol.dim.x] = blended
         else:
             self.result[y:y + symbol.dim.y, x:x + symbol.dim.x] = symbol.data[:, :, :3]
-        self.bounding_boxes.append(
-            BoundingBox(
-                center=self.get_abs(position),
-                dim=self.get_abs(symbol.dim),
-                symbol=symbol
+
+        # only add bounding box for real symbols (not hard negatives)
+        if not symbol.is_hard_negative():
+            self.bounding_boxes.append(
+                BoundingBox(
+                    center=self.get_abs(position),
+                    dim=self.get_abs(symbol.dim),
+                    symbol=symbol
+                )
             )
-        )
         return True
 
     def place_symbol_on_line(self, symbol: Symbol, scale_range: tuple[float, float] = SCALE_RANGE_ON_LINE) -> bool:

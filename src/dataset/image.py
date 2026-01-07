@@ -34,7 +34,6 @@ SYMBOL_NOISE_SIGMA_RANGE = (0, 20)
 SYMBOL_BLUR_KERNELS = [3, 5]
 SYMBOL_EROSION_KERNELS = [2, 3]
 SYMBOL_DILATION_KERNELS = [2, 3]
-SYMBOL_LINE_THICKNESS_RANGE = (0.8, 1.2)  # multiplier for morphological ops
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -349,6 +348,15 @@ class Symbol(Image):
 
         return Symbol(name=self.name, data=img, id=self.id, placement=self.placement)
 
+    def is_hard_negative(self) -> bool:
+        """check if this symbol is a hard negative (id < 0)"""
+        return self.id < 0
+
+
+# hard negative class ID (negative IDs indicate hard negatives)
+HARD_NEGATIVE_ID = -1
+
+
 @dataclass
 class BoundingBox:
     """bounding box for symbol with YOLO format export"""
@@ -565,4 +573,30 @@ def grab_symbols(path: str, ids: dict[str: int], placement: dict[str: PlacementM
         result.append(new_symbol)
         logger.info(f"Loaded symbol {name} from {str(file)}")
     logger.info(f"Grabbed {len(result)} symbols from {path}.")
+    return result
+
+
+def grab_hard_negatives(path: str) -> list[Symbol]:
+    """
+    load hard negative PNG images from directory as Symbol objects with negative ID
+
+    :param path: directory containing hard negative PNG files
+    :type path: str
+    :return: list of Symbol objects with HARD_NEGATIVE_ID
+    :rtype: list[Symbol]
+    """
+    result: list[Symbol] = []
+    neg_path = Path(path)
+    if not neg_path.exists():
+        logger.warning(f"Hard negatives directory not found: {path}")
+        return result
+
+    for file in list(neg_path.glob('*.png')):
+        name = file.stem
+        data = cv2.imread(str(file), cv2.IMREAD_UNCHANGED)
+        # hard negatives use RANDOM placement and negative ID
+        result.append(Symbol(name=name, data=data, id=HARD_NEGATIVE_ID, placement=PlacementMode.RANDOM))
+        logger.info(f"Loaded hard negative {name} from {str(file)}")
+
+    logger.info(f"Grabbed {len(result)} hard negatives from {path}.")
     return result

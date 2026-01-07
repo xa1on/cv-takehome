@@ -22,7 +22,7 @@ import cv2
 
 from .image import (
     Vector2, PlacementMode, Background, Symbol,
-    detect_lines, extract_pdfs, grab_backgrounds, grab_symbols
+    detect_lines, extract_pdfs, grab_backgrounds, grab_symbols, grab_hard_negatives
 )
 from .sample import Sample
 
@@ -30,6 +30,7 @@ from .sample import Sample
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
 SYMBOLS_DIR = os.path.join(DIR_PATH, "../../symbols")
+HARD_NEGATIVES_DIR = os.path.join(SYMBOLS_DIR, "negatives")
 BACKGROUNDS_DIR = os.path.join(DIR_PATH, "../../architecture")
 
 DATA_DIR = os.path.join(DIR_PATH, "../../data")
@@ -60,6 +61,7 @@ LOG_INTERVAL = 10
 NUM_ON_LINE_RANGE = (0, 2)
 NUM_NEXT_TO_LINE_RANGE = (0, 2)
 NUM_RANDOM_RANGE = (0, 2)
+NUM_HARD_NEGATIVES_RANGE = (0, 3)
 
 # Demo visualization parameters
 DEMO_SYMBOLS_PER_TYPE = (2, 5)
@@ -73,10 +75,11 @@ logger = logging.getLogger(__name__)
 class DatasetGenerator:
     """generates synthetic YOLO datasets by placing symbols on architectural backgrounds"""
 
-    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str):
+    def __init__(self, symbols: list[Symbol], backgrounds: list[Background], output_dir: str,
+                 hard_negatives: list[Symbol] = None):
         """
         initalize DatasetGenerator
-        
+
         :param self:
         :param symbols: list of symbols
         :type symbols: list[Symbol]
@@ -84,9 +87,12 @@ class DatasetGenerator:
         :type backgrounds: list[Background]
         :param output_dir: output directory of the dataset
         :type output_dir: str
+        :param hard_negatives: list of hard negative symbols
+        :type hard_negatives: list[Symbol]
         """
         self.symbols = symbols
         self.backgrounds = backgrounds
+        self.hard_negatives = hard_negatives or []
         self.output_dir = Path(output_dir)
 
         if self.output_dir.exists() and self.output_dir.is_dir():
@@ -102,7 +108,8 @@ class DatasetGenerator:
         logger.info("Successfully initialized DatasetGenerator")
 
     @classmethod
-    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str):
+    def from_imgs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str,
+                  hard_negatives_dir: str = HARD_NEGATIVES_DIR):
         """
         create generator from existing PNG background images
 
@@ -112,15 +119,20 @@ class DatasetGenerator:
         :type backgrounds_dir: str
         :param output_dir: output directory for generated dataset
         :type output_dir: str
+        :param hard_negatives_dir: directory containing hard negative PNG files
+        :type hard_negatives_dir: str
         :return: initialized DatasetGenerator
         :rtype: DatasetGenerator
         """
         backgrounds = grab_backgrounds(backgrounds_dir)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
-        return cls(symbols, backgrounds, output_dir)
+        hard_negatives = grab_hard_negatives(hard_negatives_dir)
+        return cls(symbols, backgrounds, output_dir, hard_negatives)
 
     @classmethod
-    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str, extract_output: str = EXTRACTED_IMG_DIR, tile_size: Vector2 = TILE_SIZE):
+    def from_pdfs(cls, symbols_dir: str, backgrounds_dir: str, output_dir: str,
+                  extract_output: str = EXTRACTED_IMG_DIR, tile_size: Vector2 = TILE_SIZE,
+                  hard_negatives_dir: str = HARD_NEGATIVES_DIR):
         """
         create generator by extracting backgrounds from PDF files
 
@@ -134,13 +146,16 @@ class DatasetGenerator:
         :type extract_output: str
         :param tile_size: the size of each tile
         :type tile_size: Vector2
+        :param hard_negatives_dir: directory containing hard negative PNG files
+        :type hard_negatives_dir: str
         :return: initialized DatasetGenerator
         :rtype: DatasetGenerator
         """
         Path(extract_output).mkdir(parents=True, exist_ok=True)
         backgrounds = extract_pdfs(backgrounds_dir, extract_output, tile_size)
         symbols = grab_symbols(symbols_dir, CLASS_IDS, CLASS_PLACEMENT)
-        return cls(symbols, backgrounds, output_dir)
+        hard_negatives = grab_hard_negatives(hard_negatives_dir)
+        return cls(symbols, backgrounds, output_dir, hard_negatives)
 
     def _get_symbol_by_placement(self, placement: PlacementMode):
         """
@@ -157,7 +172,8 @@ class DatasetGenerator:
     def generate_sample(self, background: Background,
                         num_on_line: tuple[int, int] = NUM_ON_LINE_RANGE,
                         num_next_to_line: tuple[int, int] = NUM_NEXT_TO_LINE_RANGE,
-                        num_random: tuple[int, int] = NUM_RANDOM_RANGE) -> Sample:
+                        num_random: tuple[int, int] = NUM_RANDOM_RANGE,
+                        num_hard_negatives: tuple[int, int] = NUM_HARD_NEGATIVES_RANGE) -> Sample:
         """
         generate a single sample with symbols placed on background
 
@@ -169,6 +185,8 @@ class DatasetGenerator:
         :type num_next_to_line: tuple[int, int]
         :param num_random: range (min, max) of RANDOM symbols to place
         :type num_random: tuple[int, int]
+        :param num_hard_negatives: range (min, max) of hard negatives to place
+        :type num_hard_negatives: tuple[int, int]
         :return: generated sample with placed symbols
         :rtype: Sample
         """
@@ -184,6 +202,13 @@ class DatasetGenerator:
                 n = random.randint(*count_range)
                 placed = sum(1 for _ in range(n) if sample.place_symbol(symbol))
                 logger.debug(f"Placed {placed}/{n} {placement.name} symbols")
+
+        # place hard negatives
+        if self.hard_negatives:
+            n = random.randint(*num_hard_negatives)
+            for _ in range(n):
+                negative = random.choice(self.hard_negatives)
+                sample.place_symbol(negative)
 
         return sample
 
