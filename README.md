@@ -1,5 +1,44 @@
 # CV Take-Home Challenge: Synthetic Dataset Generation & Symbol Detection
 
+## Includes
+
+- `src.dataset.gen` dataset generator
+- `src.inference.infer` run inference
+
+## Installation
+
+- Use pip to install dependencies
+```sh
+pip install -r requirements.txt
+```
+
+## Training
+
+- put background pdfs in `architecture`
+- put symbols in `symbols`
+- run dataset generation script
+    - `python -m src.dataset.gen --from-pdfs --num-samples 500`
+    - flags (only the important ones):
+        - `--num-samples`- number of samples
+        - `--from-pdfs`- extract images for training from pdfs
+    - you can also edit the constants in the python files under `src.dataset` for more configuration options
+- zip the generated dataset folder in `data/`
+- use the python notebook in `src.train` (in colab or locally)
+- it'll show validation set stats
+
+## Inference
+
+- place the model in `models/`
+- run inference script
+    - `python -m src.inference.infer .\test_set\PublicTestHVAC.pdf`
+- this'll output inference results in `data/inference_results/`
+- If you want to run validation, run the cells under validation in `src.train.train_yolo.ipynb`
+
+
+### Original README / project specs
+
+<details>
+
 ## Overview
 
 This challenge tests your ability to create a synthetic dataset generator and train a computer vision model for symbol detection. The goal is to determine whether synthetic training data can effectively train a model to detect symbols in real-world architectural documents.
