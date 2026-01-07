@@ -187,7 +187,7 @@ class DatasetGenerator:
 
         return sample
 
-    def generate_dataset(self, num_samples: int = DEFAULT_NUM_SAMPLES, train_split: float = DEFAULT_TRAIN_SPLIT) -> dict[str, int]:
+    def generate_dataset(self, num_samples: int = DEFAULT_NUM_SAMPLES, train_split: float = DEFAULT_TRAIN_SPLIT, apply_noise: bool = True) -> dict[str, int]:
         """
         generate full dataset with train/val split
 
@@ -195,6 +195,8 @@ class DatasetGenerator:
         :type num_samples: int
         :param train_split: fraction of samples for training (0-1)
         :type train_split: float
+        :param apply_noise: whether to apply noise augmentation to samples
+        :type apply_noise: bool
         :return: statistics dict with train, val, and total_symbols counts
         :rtype: dict[str, int]
         """
@@ -212,7 +214,7 @@ class DatasetGenerator:
 
             image_path = str(self.images_dir / split / f"synthetic_{i:05d}.jpg")
             label_path = str(self.labels_dir / split / f"synthetic_{i:05d}.txt")
-            sample.save(image_path, label_path)
+            sample.save(image_path, label_path, apply_noise=apply_noise)
 
             stats[split] += 1
             stats['total_symbols'] += len(sample.bounding_boxes)
@@ -319,6 +321,7 @@ def main():
     parser.add_argument('--demo-placement', action='store_true', help='Demo symbol placement with bounding boxes')
     parser.add_argument('--demo-bg', type=str, help='Background image for demo-placement (optional)')
     parser.add_argument('--demo-save', type=str, help='Save path for demo visualization (optional)')
+    parser.add_argument('--no-noise', action='store_true', help='Disable noise augmentation')
 
     args = parser.parse_args()
 
@@ -335,7 +338,7 @@ def main():
     else:
         generator = DatasetGenerator.from_imgs(SYMBOLS_DIR, EXTRACTED_IMG_DIR, OUTPUT_DIR)
 
-    stats = generator.generate_dataset(num_samples=args.num_samples)
+    stats = generator.generate_dataset(num_samples=args.num_samples, apply_noise=not args.no_noise)
 
     print("Finished!")
     print(f"Train samples: {stats['train']}")

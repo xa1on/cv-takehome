@@ -25,9 +25,9 @@ LINE_RATIO_MIN_NEXT_TO = 0.15
 LINE_RATIO_MAX_NEXT_TO = 0.85
 
 # symbol scale ranges (relative to image size)
-SCALE_RANGE_ON_LINE = (0.05, 0.30)
-SCALE_RANGE_NEXT_TO_LINE = (0.07, 0.30)
-SCALE_RANGE_RANDOM = (0.07, 0.30)
+SCALE_RANGE_ON_LINE = (0.02, 0.15)
+SCALE_RANGE_NEXT_TO_LINE = (0.04, 0.30)
+SCALE_RANGE_RANDOM = (0.04, 0.30)
 
 # perpendicular offset range for NEXT_TO_LINE placement
 PERPENDICULAR_OFFSET_RANGE = (30, 80)
@@ -37,6 +37,14 @@ RANDOM_PLACEMENT_MARGIN = 50
 
 # overlap detection margin
 OVERLAP_MARGIN = 10
+
+# noise and augmentation parameters
+GAUSSIAN_NOISE_SIGMA_RANGE = (0, 15)
+SALT_PEPPER_PROB = 0.002
+BRIGHTNESS_RANGE = (-30, 30)
+CONTRAST_RANGE = (0.8, 1.2)
+BLUR_KERNEL_SIZES = [3, 5]
+JPEG_QUALITY_RANGE = (70, 95)
 
 # visualization constants
 BBOX_COLORS = {
@@ -183,7 +191,7 @@ class Sample(Background):
             position = line.perpendicular_point(base_point, offset)
 
             scale = random.uniform(*scale_range)
-            transformed = symbol.transform(scale=scale)
+            transformed = symbol.transform(scale=scale, rotation=random.randint(0, 360))
 
             if self._is_valid_position(position, transformed):
                 return self._overlay_symbol(transformed, position)
@@ -209,7 +217,7 @@ class Sample(Background):
             position = Vector2(x, y)
 
             scale = random.uniform(*scale_range)
-            transformed = symbol.transform(scale=scale)
+            transformed = symbol.transform(scale=scale, rotation=random.randint(0, 360))
 
             if self._is_valid_position(position, transformed):
                 return self._overlay_symbol(transformed, position)
@@ -232,7 +240,49 @@ class Sample(Background):
         else:
             return self.place_symbol_random(symbol)
 
-    def save(self, image_path: str, label_path: str) -> None:
+    def apply_noise(self, noise_prob: float = 0.7) -> None:
+        """
+        apply random noise and augmentation to simulate real-world document quality
+
+        :param noise_prob: probability of applying each noise type
+        :type noise_prob: float
+        """
+        img = self.result.copy().astype(np.float32)
+
+        # gaussian noise
+        if random.random() < noise_prob:
+            sigma = random.uniform(*GAUSSIAN_NOISE_SIGMA_RANGE)
+            noise = np.random.normal(0, sigma, img.shape)
+            img = img + noise
+
+        # brightness adjustment
+        if random.random() < noise_prob:
+            brightness = random.uniform(*BRIGHTNESS_RANGE)
+            img = img + brightness
+
+        # contrast adjustment
+        if random.random() < noise_prob:
+            contrast = random.uniform(*CONTRAST_RANGE)
+            mean = np.mean(img)
+            img = (img - mean) * contrast + mean
+
+        # clip values and convert back
+        img = np.clip(img, 0, 255).astype(np.uint8)
+
+        # salt and pepper noise (applied after clipping)
+        if random.random() < noise_prob * 0.5:
+            mask = np.random.random(img.shape[:2])
+            img[mask < SALT_PEPPER_PROB] = 0
+            img[mask > (1 - SALT_PEPPER_PROB)] = 255
+
+        # slight blur to simulate scan/print artifacts
+        if random.random() < noise_prob * 0.3:
+            kernel_size = random.choice(BLUR_KERNEL_SIZES)
+            img = cv2.GaussianBlur(img, (kernel_size, kernel_size), 0)
+
+        self.result = img
+
+    def save(self, image_path: str, label_path: str, apply_noise: bool = True) -> None:
         """
         save sample image and YOLO format labels
 
@@ -240,7 +290,19 @@ class Sample(Background):
         :type image_path: str
         :param label_path: path to save label file
         :type label_path: str
+        :param apply_noise: whether to apply noise augmentation before saving
+        :type apply_noise: bool
         """
+        if apply_noise:
+            self.apply_noise()
+
+        # simulate jpeg compression artifacts
+        if apply_noise and random.random() < 0.5:
+            quality = random.randint(*JPEG_QUALITY_RANGE)
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+            _, encoded = cv2.imencode('.jpg', self.result, encode_param)
+            self.result = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+
         cv2.imwrite(image_path, self.result)
         with open(label_path, 'w') as f:
             for box in self.bounding_boxes:
