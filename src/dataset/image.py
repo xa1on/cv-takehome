@@ -8,6 +8,8 @@ from typing import Self
 from pathlib import Path
 from dataclasses import dataclass
 
+import random
+
 import cv2
 import numpy as np
 from pdf2image import convert_from_path
@@ -23,7 +25,16 @@ MAX_LINE_GAP = 3
 GAUSSIAN_BLUR = 5
 
 # other args
-IMG_MARGINS = 0.30
+IMG_MARGINS = 0.20
+
+# symbol augmentation parameters
+SYMBOL_BRIGHTNESS_RANGE = (-40, 40)
+SYMBOL_CONTRAST_RANGE = (0.7, 1.3)
+SYMBOL_NOISE_SIGMA_RANGE = (0, 20)
+SYMBOL_BLUR_KERNELS = [3, 5]
+SYMBOL_EROSION_KERNELS = [2, 3]
+SYMBOL_DILATION_KERNELS = [2, 3]
+SYMBOL_LINE_THICKNESS_RANGE = (0.8, 1.2)  # multiplier for morphological ops
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -180,18 +191,132 @@ class Symbol(Image):
     id: int
     placement: PlacementMode
 
-    def transform(self, scale: float=1, rotation: float=0) -> Self:
+    def _augment_appearance(self, img: np.ndarray, aug_prob: float = 0.7) -> np.ndarray:
         """
-        create transformed copy of symbol with scale and rotation
+        apply random appearance variations to symbol
+
+        :param img: symbol image (BGR or BGRA)
+        :type img: np.ndarray
+        :param aug_prob: probability of applying each augmentation
+        :type aug_prob: float
+        :return: augmented image
+        :rtype: np.ndarray
+        """
+        has_alpha = img.shape[2] == 4
+        if has_alpha:
+            alpha = img[:, :, 3:4]
+            rgb = img[:, :, :3].astype(np.float32)
+        else:
+            alpha = None
+            rgb = img.astype(np.float32)
+
+        # brightness adjustment
+        if random.random() < aug_prob:
+            brightness = random.uniform(*SYMBOL_BRIGHTNESS_RANGE)
+            rgb = rgb + brightness
+
+        # contrast adjustment
+        if random.random() < aug_prob:
+            contrast = random.uniform(*SYMBOL_CONTRAST_RANGE)
+            mean = np.mean(rgb)
+            rgb = (rgb - mean) * contrast + mean
+
+        # gaussian noise
+        if random.random() < aug_prob * 0.5:
+            sigma = random.uniform(*SYMBOL_NOISE_SIGMA_RANGE)
+            noise = np.random.normal(0, sigma, rgb.shape)
+            rgb = rgb + noise
+
+        rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+
+        # recombine with alpha
+        if has_alpha:
+            img = np.concatenate([rgb, alpha], axis=2)
+        else:
+            img = rgb
+
+        return img
+
+    def _degrade_symbol(self, img: np.ndarray, degrade_prob: float = 0.5) -> np.ndarray:
+        """
+        apply degradation effects to simulate worn/faded symbols
+
+        :param img: symbol image (BGR or BGRA)
+        :type img: np.ndarray
+        :param degrade_prob: probability of applying degradation
+        :type degrade_prob: float
+        :return: degraded image
+        :rtype: np.ndarray
+        """
+        has_alpha = img.shape[2] == 4
+        if has_alpha:
+            alpha = img[:, :, 3]
+            rgb = img[:, :, :3]
+        else:
+            alpha = None
+            rgb = img
+
+        # erosion - makes lines thinner (faded print)
+        if random.random() < degrade_prob * 0.4:
+            kernel_size = random.choice(SYMBOL_EROSION_KERNELS)
+            kernel = np.ones((kernel_size, kernel_size), np.uint8)
+            rgb = cv2.erode(rgb, kernel, iterations=1)
+            if has_alpha:
+                alpha = cv2.erode(alpha, kernel, iterations=1)
+
+        # dilation - makes lines thicker (ink bleed)
+        elif random.random() < degrade_prob * 0.4:
+            kernel_size = random.choice(SYMBOL_DILATION_KERNELS)
+            kernel = np.ones((kernel_size, kernel_size), np.uint8)
+            rgb = cv2.dilate(rgb, kernel, iterations=1)
+            if has_alpha:
+                alpha = cv2.dilate(alpha, kernel, iterations=1)
+
+        # slight blur (out of focus / low quality scan)
+        if random.random() < degrade_prob * 0.3:
+            kernel_size = random.choice(SYMBOL_BLUR_KERNELS)
+            rgb = cv2.GaussianBlur(rgb, (kernel_size, kernel_size), 0)
+
+        # partial occlusion - randomly mask small region
+        if random.random() < degrade_prob * 0.2:
+            h, w = rgb.shape[:2]
+            # create small rectangular occlusion
+            occ_w = random.randint(w // 8, w // 4)
+            occ_h = random.randint(h // 8, h // 4)
+            occ_x = random.randint(0, w - occ_w)
+            occ_y = random.randint(0, h - occ_h)
+            # fill with white (background color)
+            rgb[occ_y:occ_y + occ_h, occ_x:occ_x + occ_w] = 255
+            if has_alpha:
+                alpha[occ_y:occ_y + occ_h, occ_x:occ_x + occ_w] = 0
+
+        # recombine
+        if has_alpha:
+            img = np.dstack([rgb, alpha])
+        else:
+            img = rgb
+
+        return img
+
+    def transform(self, scale: float = 1, rotation: float = 0, augment: bool = True) -> Self:
+        """
+        create transformed copy of symbol with scale, rotation, and optional augmentation
 
         :param scale: scale factor (1.0 = original size)
         :type scale: float
         :param rotation: rotation angle in degrees
         :type rotation: float
+        :param augment: whether to apply appearance variations and degradation
+        :type augment: bool
         :return: new transformed Symbol
         :rtype: Self
         """
         img = self.data.copy()
+
+        # apply appearance variations before geometric transforms
+        if augment:
+            img = self._augment_appearance(img)
+            img = self._degrade_symbol(img)
 
         if scale != 1.0:
             new_width = int(img.shape[1] * scale)
