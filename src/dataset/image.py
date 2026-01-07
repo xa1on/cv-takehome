@@ -1,3 +1,4 @@
+import shutil
 import os
 import math
 import logging
@@ -20,6 +21,9 @@ MIN_LINE_LENGTH = 75
 MAX_LINE_GAP = 3
 
 GAUSSIAN_BLUR = 5
+
+# other args
+IMG_MARGINS = 0.30
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -294,7 +298,7 @@ def detect_lines(img: np.array) -> list[DetectedLine]:
 
 
 
-def tile_background(background: Background, tile_size: Vector2, margin: float = 0.15) -> list[Background]:
+def tile_background(background: Background, tile_size: Vector2, margin: float = IMG_MARGINS) -> list[Background]:
     """
     tile a background image into smaller chunks, ignoring margins
     :param background: the background image to tile
@@ -372,6 +376,11 @@ def extract_pdfs(path: str, output: str, tile_size: Vector2) -> list[Background]
     :rtype: list[Background]
     """
     result: list[Background] = []
+    output_path = Path(output)
+    if output_path.exists() and output_path.is_dir():
+        logger.info(f"Clearing existing extracted images at {output_path}")
+        shutil.rmtree(output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
     for file in list(Path(path).glob('*.pdf')):
         result += extract_pdf_img(str(file), output, tile_size)
     logger.info(f"Extracted {len(result)} background images total from {path}.")

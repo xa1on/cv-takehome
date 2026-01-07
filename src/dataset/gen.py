@@ -14,6 +14,7 @@ Generate architectural datasets for symbol detection
 
 import os
 import random
+import shutil
 import logging
 from pathlib import Path
 
@@ -34,7 +35,6 @@ BACKGROUNDS_DIR = os.path.join(DIR_PATH, "../../architecture")
 DATA_DIR = os.path.join(DIR_PATH, "../../data")
 EXTRACTED_IMG_DIR = os.path.join(DATA_DIR, "extracted_arch")
 OUTPUT_DIR = os.path.join(DATA_DIR, "dataset")
-
 
 TILE_SIZE = Vector2(x=1024, y=1024)
 
@@ -57,9 +57,9 @@ DEFAULT_TRAIN_SPLIT = 0.8
 LOG_INTERVAL = 10
 
 # Symbol count ranges per sample
-NUM_ON_LINE_RANGE = (4, 10)
-NUM_NEXT_TO_LINE_RANGE = (4, 10)
-NUM_RANDOM_RANGE = (4, 15)
+NUM_ON_LINE_RANGE = (0, 2)
+NUM_NEXT_TO_LINE_RANGE = (0, 2)
+NUM_RANDOM_RANGE = (0, 2)
 
 # Demo visualization parameters
 DEMO_SYMBOLS_PER_TYPE = (2, 5)
@@ -88,6 +88,11 @@ class DatasetGenerator:
         self.symbols = symbols
         self.backgrounds = backgrounds
         self.output_dir = Path(output_dir)
+
+        if self.output_dir.exists() and self.output_dir.is_dir():
+            logger.info(f"Removing existing dataset at {self.output_dir}")
+            shutil.rmtree(self.output_dir)
+
         self.images_dir = Path(os.path.join(self.output_dir, 'images'))
         self.labels_dir = Path(os.path.join(self.output_dir, 'labels'))
 
